@@ -67,3 +67,12 @@ If Cargo is missing from the process path, prepend `C:\Users\<user>\.cargo\bin` 
 - Use milestone Conventional Commit messages; do not commit broken states or secrets.
 - Primary branch is `main`; never force-push shared history.
 - Corporate actions, dividends, options, shorts, interest accrual, imports, tax-lot selection, and contribution-adjusted returns remain out of scope.
+
+## Public repository privacy
+
+- Treat every tracked file, commit, branch, tag, test fixture, screenshot, and document as public.
+- Use clearly synthetic symbols, quantities, prices, dates, account balances, and transaction histories in examples and tests.
+- Never copy values from a user's app-data store, screenshots, attachments, conversation, or real portfolio into the repository.
+- Never commit personal names, personal email addresses, machine usernames, absolute user paths, credentials, logs, local stores, or unredacted screenshots.
+- Use the repository's GitHub no-reply identity for commits and pseudonymous project metadata.
+- Before every push, inspect the staged diff and scan tracked content for secrets, personal paths, email addresses, and realistic portfolio data.

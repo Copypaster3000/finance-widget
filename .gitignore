@@ -16,7 +16,11 @@ src-tauri/target/
 .DS_Store
 Thumbs.db
 coverage/
-screenshots/*.png
+screenshots/
+attachments/
+portfolio.json
+portfolio*.backup.json
+*.bak
 src-tauri/gen/
 src-tauri/icons/android/
 src-tauri/icons/ios/
