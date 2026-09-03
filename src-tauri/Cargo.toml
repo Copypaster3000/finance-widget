@@ -1,0 +1,24 @@
+[package]
+name = "finance-widget"
+version = "0.1.0"
+description = "Windows finance and portfolio widget"
+authors = ["Copypaster3000"]
+edition = "2021"
+
+[lib]
+name = "portfolio_rice_widget_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", features = ["cookies"] }
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-autostart = "2"
+tauri-plugin-http = "2"
+tauri-plugin-process = "2"
+tauri-plugin-store = "2"
+tauri-plugin-window-state = "2"
