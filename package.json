@@ -8,6 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
+    "privacy:check": "node scripts/check-public-data.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "tauri": "tauri",

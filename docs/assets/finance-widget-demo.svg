@@ -1,0 +1,120 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" role="img" aria-labelledby="title desc">
+  <title id="title">Finance Widget fictional portfolio preview</title>
+  <desc id="desc">A warm charcoal desktop finance widget showing fictional MSFT, SPY, and ETH holdings.</desc>
+  <defs>
+    <linearGradient id="desk" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#b8b59f"/>
+      <stop offset="0.46" stop-color="#92917d"/>
+      <stop offset="1" stop-color="#6f7060"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#393a32" stop-opacity="0.98"/>
+      <stop offset="1" stop-color="#2f302a" stop-opacity="0.98"/>
+    </linearGradient>
+    <linearGradient id="area" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#d0a22c" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#d0a22c" stop-opacity="0"/>
+    </linearGradient>
+    <pattern id="grain" width="9" height="9" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="3" r="0.55" fill="#fff" opacity="0.12"/>
+      <circle cx="7" cy="8" r="0.45" fill="#1f201b" opacity="0.18"/>
+    </pattern>
+    <style>
+      .mono { font-family: "IBM Plex Mono", "Cascadia Mono", Consolas, monospace; }
+      .label { fill: #aaa99b; font-size: 10px; letter-spacing: 2.4px; }
+      .small { fill: #aead9f; font-size: 11px; letter-spacing: 1px; }
+      .value { fill: #f0efe7; }
+      .amber { fill: #d0a22c; }
+      .line { stroke: #727266; stroke-opacity: 0.42; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="760" fill="url(#desk)"/>
+  <rect width="1200" height="760" fill="url(#grain)" opacity="0.38"/>
+  <circle cx="1040" cy="95" r="250" fill="#d0a22c" opacity="0.08"/>
+  <circle cx="100" cy="700" r="310" fill="#f0efe7" opacity="0.05"/>
+
+  <rect x="150" y="28" width="508" height="716" rx="20" fill="#202119" opacity="0.24"/>
+  <g class="mono" transform="translate(166 38)">
+    <rect width="476" height="684" rx="8" fill="url(#panel)" stroke="#8d8d7f" stroke-width="1"/>
+    <path d="M8 22V8h14 M454 8h14v14 M8 662v14h14 M454 676h14v-14" fill="none" stroke="#d0a22c" stroke-width="1.5"/>
+
+    <g transform="translate(26 23)">
+      <rect x="0" y="11" width="2" height="18" fill="#77776b"/>
+      <rect x="6" y="4" width="2" height="25" fill="#d0a22c"/>
+      <rect x="12" y="15" width="2" height="14" fill="#77776b"/>
+      <text x="25" y="8" class="label">LOCAL / PORTFOLIO</text>
+      <text x="25" y="26" fill="#f0efe7" font-size="12" font-weight="700" letter-spacing="1.8">FINANCE WIDGET</text>
+      <g fill="none" stroke="#a5a599" stroke-width="1.2" opacity="0.85" transform="translate(322 2)">
+        <path d="M0 12c5-6 11-6 16 0-5 6-11 6-16 0Z"/><circle cx="8" cy="12" r="2"/>
+        <path d="M36 4v16M28 12h16"/>
+        <circle cx="68" cy="12" r="7"/><circle cx="68" cy="12" r="2.5"/>
+        <path d="M96 5l14 14M110 5L96 19"/>
+      </g>
+    </g>
+    <line x1="25" y1="68" x2="451" y2="68" class="line"/>
+    <line x1="25" y1="68" x2="76" y2="68" stroke="#d0a22c"/>
+
+    <text x="26" y="105" class="label">NET PORTFOLIO VALUE</text>
+    <rect x="184" y="93" width="23" height="17" fill="#d0a22c" opacity="0.14" stroke="#d0a22c" stroke-opacity="0.5"/>
+    <text x="190" y="105" class="amber" font-size="10">03</text>
+    <text x="25" y="151" class="value" font-size="39" font-weight="500">$41,250.00</text>
+    <text x="27" y="171" class="label">USD / 03 ASSETS</text>
+    <text x="449" y="151" class="amber" text-anchor="end" font-size="18" font-weight="600">+$675.00</text>
+    <text x="449" y="170" class="amber" text-anchor="end" font-size="11">+1.66%</text>
+
+    <text x="26" y="207" class="label">PORTFOLIO HISTORY</text>
+    <text x="449" y="207" class="amber" text-anchor="end" font-size="11">+8.12%</text>
+    <path d="M27 303 L27 287 L61 285 L61 278 L91 279 L91 272 L124 274 L124 257 L151 252 L151 245 L183 247 L183 226 L215 222 L215 212 L247 215 L247 196 L281 199 L281 187 L316 186 L316 194 L348 191 L348 180 L380 184 L380 173 L415 176 L449 159 L449 303Z" fill="url(#area)"/>
+    <path d="M27 287 L61 285 L61 278 L91 279 L91 272 L124 274 L124 257 L151 252 L151 245 L183 247 L183 226 L215 222 L215 212 L247 215 L247 196 L281 199 L281 187 L316 186 L316 194 L348 191 L348 180 L380 184 L380 173 L415 176 L449 159" fill="none" stroke="#d0a22c" stroke-width="1.7"/>
+    <text x="27" y="321" class="small">08/17/26</text>
+    <text x="449" y="321" class="small" text-anchor="end">NOW</text>
+    <g class="small" font-size="10">
+      <text x="27" y="343">1HR</text><text x="70" y="343">1D</text><text x="108" y="343">1W</text><text x="148" y="343" class="amber">MAX</text>
+      <line x1="147" y1="350" x2="172" y2="350" stroke="#d0a22c"/>
+    </g>
+    <line x1="25" y1="360" x2="451" y2="360" class="line"/>
+
+    <g transform="translate(26 392)">
+      <text class="value" font-size="17" font-weight="700">MSFT</text><text x="57" class="label">EQUITY / USD</text>
+      <text x="423" class="amber" text-anchor="end" font-size="12" font-weight="600">$12,500.00  +1.20%</text>
+      <line x1="0" y1="22" x2="423" y2="22" class="line"/>
+      <line x1="0" y1="22" x2="137" y2="22" stroke="#d0a22c" stroke-width="2"/>
+      <text y="43" class="small">25 SHARES</text><text x="209" y="43" class="small">@ $500.00</text><text x="423" y="43" class="small" text-anchor="end">30.3%</text>
+    </g>
+    <g transform="translate(26 470)">
+      <text class="value" font-size="17" font-weight="700">SPY</text><text x="43" class="label">EQUITY / USD</text>
+      <text x="423" class="amber" text-anchor="end" font-size="12" font-weight="600">$9,750.00  -0.50%</text>
+      <line x1="0" y1="22" x2="423" y2="22" class="line"/>
+      <line x1="0" y1="22" x2="107" y2="22" stroke="#d0a22c" stroke-width="2"/>
+      <text y="43" class="small">15 SHARES</text><text x="209" y="43" class="small">@ $650.00</text><text x="423" y="43" class="small" text-anchor="end">23.6%</text>
+    </g>
+    <g transform="translate(26 548)">
+      <text class="value" font-size="17" font-weight="700">ETH</text><text x="43" class="label">CRYPTO / USD</text>
+      <text x="423" class="amber" text-anchor="end" font-size="12" font-weight="600">$15,500.00  +4.10%</text>
+      <line x1="0" y1="22" x2="423" y2="22" class="line"/>
+      <line x1="0" y1="22" x2="160" y2="22" stroke="#d0a22c" stroke-width="2"/>
+      <text y="43" class="small">5 ETH</text><text x="209" y="43" class="small">@ $3,100.00</text><text x="423" y="43" class="small" text-anchor="end">37.6%</text>
+    </g>
+    <line x1="25" y1="623" x2="451" y2="623" class="line"/>
+    <rect x="27" y="649" width="6" height="6" fill="#d0a22c"/>
+    <text x="39" y="655" class="small" font-size="9">LIVE / EXTENDED</text>
+    <text x="449" y="655" class="small" font-size="9" text-anchor="end">CHECKED 10:30 PM</text>
+  </g>
+
+  <g class="mono" transform="translate(718 172)">
+    <text class="label" font-size="12">WINDOWS 11 / LOCAL-FIRST</text>
+    <text y="66" fill="#33342d" font-size="48" font-weight="700">YOUR PORTFOLIO.</text>
+    <text y="119" fill="#33342d" font-size="48" font-weight="700">AT A GLANCE.</text>
+    <line y1="151" x2="82" y2="151" stroke="#d0a22c" stroke-width="3"/>
+    <text y="198" fill="#44453c" font-size="17">A compact desktop instrument for</text>
+    <text y="227" fill="#44453c" font-size="17">prices, transactions, and history.</text>
+    <g transform="translate(0 283)" font-size="13" fill="#3f4038">
+      <rect width="7" height="7" fill="#d0a22c"/><text x="20" y="8">DETERMINISTIC FIFO LEDGER</text>
+      <rect y="40" width="7" height="7" fill="#d0a22c"/><text x="20" y="48">LOCAL PORTFOLIO STORAGE</text>
+      <rect y="80" width="7" height="7" fill="#d0a22c"/><text x="20" y="88">RESPONSIVE WIDGET LAYOUT</text>
+      <rect y="120" width="7" height="7" fill="#d0a22c"/><text x="20" y="128">PRIVACY MASK FOR SHARING</text>
+    </g>
+    <text y="471" class="label" fill="#5e5f53">FICTIONAL DEMO DATA</text>
+  </g>
+</svg>
