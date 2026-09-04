@@ -1,4 +1,3 @@
-import { isTauri } from '@tauri-apps/api/core';
 import { Store } from '@tauri-apps/plugin-store';
 import type { AppConfig, HistoricalCache, Holding, LedgerPriceCache, PortfolioHourlyCache, PortfolioLedger, Quote } from './types';
 import { DEFAULT_CONFIG } from './defaults';
@@ -78,6 +77,10 @@ function enqueueNativeWrite(operation: (appStore: Store) => Promise<void>): Prom
   return queued;
 }
 
+function hasNativeBridge(): boolean {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+}
+
 function loadBrowserState(): ReturnType<typeof readStoredState> {
   const rawConfig = JSON.parse(localStorage.getItem(CONFIG_KEY) || 'null') as (Partial<AppConfig> & { holdings?: Holding[] }) | null;
   return readStoredState({
@@ -114,7 +117,7 @@ function readStoredState(values: {
 }
 
 export async function loadState(): Promise<{ config: AppConfig; quotes: Quote[]; historyCache: HistoricalCache; hourlyHistory: PortfolioHourlyCache; ledger: PortfolioLedger; ledgerPriceCache: LedgerPriceCache; ledgerMigrated: boolean; configMigrated: boolean }> {
-  if (isTauri()) {
+  if (hasNativeBridge()) {
     return withNativeStore(async (appStore) => {
       const rawConfig = await appStore.get<Partial<AppConfig> & { holdings?: Holding[] } & Record<string, unknown>>(CONFIG_KEY);
       const quotes = (await appStore.get<Quote[]>(QUOTES_KEY)) ?? [];
@@ -130,32 +133,32 @@ export async function loadState(): Promise<{ config: AppConfig; quotes: Quote[];
 
 export async function saveLedgerPriceCache(cache: LedgerPriceCache): Promise<void> {
   const sanitized = sanitizeLedgerPriceCache(cache);
-  if (!isTauri()) return localStorage.setItem(LEDGER_PRICE_HISTORY_KEY, JSON.stringify(sanitized));
+  if (!hasNativeBridge()) return localStorage.setItem(LEDGER_PRICE_HISTORY_KEY, JSON.stringify(sanitized));
   return enqueueNativeWrite(async (appStore) => { await appStore.set(LEDGER_PRICE_HISTORY_KEY, sanitized); await appStore.save(); });
 }
 
 export async function saveLedger(ledger: PortfolioLedger): Promise<void> {
-  if (!isTauri()) return localStorage.setItem(LEDGER_KEY, JSON.stringify(ledger));
+  if (!hasNativeBridge()) return localStorage.setItem(LEDGER_KEY, JSON.stringify(ledger));
   return enqueueNativeWrite(async (appStore) => { await appStore.set(LEDGER_KEY, ledger); await appStore.save(); });
 }
 
 export async function saveConfig(config: AppConfig): Promise<void> {
-  if (!isTauri()) return localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
+  if (!hasNativeBridge()) return localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
   return enqueueNativeWrite(async (appStore) => { await appStore.set(CONFIG_KEY, config); await appStore.save(); });
 }
 
 export async function saveQuotes(quotes: Quote[]): Promise<void> {
-  if (!isTauri()) return localStorage.setItem(QUOTES_KEY, JSON.stringify(quotes));
+  if (!hasNativeBridge()) return localStorage.setItem(QUOTES_KEY, JSON.stringify(quotes));
   return enqueueNativeWrite(async (appStore) => { await appStore.set(QUOTES_KEY, quotes); await appStore.save(); });
 }
 
 export async function saveHistoryCache(historyCache: HistoricalCache): Promise<void> {
-  if (!isTauri()) return localStorage.setItem(HISTORY_KEY, JSON.stringify(historyCache));
+  if (!hasNativeBridge()) return localStorage.setItem(HISTORY_KEY, JSON.stringify(historyCache));
   return enqueueNativeWrite(async (appStore) => { await appStore.set(HISTORY_KEY, historyCache); await appStore.save(); });
 }
 
 export async function saveHourlyHistory(hourlyHistory: PortfolioHourlyCache): Promise<void> {
   const sanitized = sanitizeHourlyCache(hourlyHistory);
-  if (!isTauri()) return localStorage.setItem(HOURLY_HISTORY_KEY, JSON.stringify(sanitized));
+  if (!hasNativeBridge()) return localStorage.setItem(HOURLY_HISTORY_KEY, JSON.stringify(sanitized));
   return enqueueNativeWrite(async (appStore) => { await appStore.set(HOURLY_HISTORY_KEY, sanitized); await appStore.save(); });
 }

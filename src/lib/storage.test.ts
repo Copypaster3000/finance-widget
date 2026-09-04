@@ -5,7 +5,6 @@ const mocked = vi.hoisted(() => ({
   load: vi.fn()
 }));
 
-vi.mock('@tauri-apps/api/core', () => ({ isTauri: () => mocked.native }));
 vi.mock('@tauri-apps/plugin-store', () => ({ Store: { load: mocked.load } }));
 
 function emptyStore() {
@@ -18,6 +17,7 @@ function emptyStore() {
 
 describe('native persistence resilience', () => {
   beforeEach(() => {
+    mocked.native = true;
     const browserValues = new Map<string, string>();
     Object.defineProperty(globalThis, 'localStorage', {
       configurable: true,
@@ -28,8 +28,11 @@ describe('native persistence resilience', () => {
         removeItem: (key: string) => browserValues.delete(key)
       }
     });
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: mocked.native ? { __TAURI_INTERNALS__: {} } : {}
+    });
     vi.resetModules();
-    mocked.native = true;
     mocked.load.mockReset();
     localStorage.clear();
   });
@@ -82,6 +85,7 @@ describe('native persistence resilience', () => {
 
   it('keeps localStorage support for the browser preview only', async () => {
     mocked.native = false;
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: {} });
     localStorage.setItem('portfolio-ledger-v1', JSON.stringify({ schemaVersion: 2, assets: [], events: [] }));
     const { loadState } = await import('./storage');
 
