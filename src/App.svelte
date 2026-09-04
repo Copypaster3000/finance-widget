@@ -36,6 +36,9 @@
   let privacyHidden = false;
   let refreshing = false;
   let ready = false;
+  let storageUnavailable = false;
+  let storageRetrying = false;
+  let appMounted = false;
   let feed: FeedStatus = { state: 'idle', lastCheckedAt: 0, lastQuoteReceivedAt: 0 };
   let historyLoading = false;
   let historyErrors: string[] = [];
@@ -243,24 +246,43 @@
   }
   function resetWindowSize() { void getCurrentWindow().setSize(new PhysicalSize(Math.round(474 * windowScale), Math.round(700 * windowScale))); }
 
-  onMount(() => {
-    let mounted = true;
-    const appWindow = getCurrentWindow();
-    void Promise.all([appWindow.outerSize(), appWindow.scaleFactor()]).then(([size, scale]) => { windowPixels = size; windowScale = scale; });
-    const stopResizeListener = appWindow.onResized(({ payload }) => { windowPixels = payload; });
-    void loadState().then(async (state) => {
-      if (!mounted) return;
+  async function initializeApp() {
+    if (storageRetrying) return;
+    storageRetrying = true;
+    try {
+      const state = await loadState();
+      if (!appMounted) return;
       config = state.config; ledger = state.ledger; historicalCache = state.historyCache; ledgerPriceCache = state.ledgerPriceCache; hourlyHistory = state.hourlyHistory;
+      const originalHistoryStart = config.historyStartDate;
       if (config.historyStartMode === 'auto') config = { ...config, historyStartDate: earliestBuyDate(ledger) ?? config.historyStartDate };
       const loadedHoldings = ledgerHoldings(state.ledger); const active = new Set(loadedHoldings.map((holding) => `${holding.type}:${holding.symbol.toUpperCase()}`));
       quotes = preferredStoredQuotes(state.quotes.filter((quote) => active.has(`${quote.assetType}:${quote.symbol}`)), loadedHoldings);
-      if (state.ledgerMigrated) await saveLedger(ledger); await saveConfig(config);
+      const migrationSaves: Promise<void>[] = [];
+      if (state.ledgerMigrated) migrationSaves.push(saveLedger(ledger));
+      if (state.configMigrated || config.historyStartDate !== originalHistoryStart) migrationSaves.push(saveConfig(config));
+      await Promise.all(migrationSaves);
+      if (!appMounted) return;
+      storageUnavailable = false;
       feed = { state: !loadedHoldings.length ? 'idle' : quotes.length ? 'cached' : 'unavailable', provider: quotes[0]?.provider, lastCheckedAt: 0, lastQuoteReceivedAt: 0 };
       ready = true; schedule(config.refreshMode); scheduleDayBoundary();
       try { await getCurrentWindow().setAlwaysOnTop(config.windowMode === 'alwaysOnTop'); await getCurrentWindow().setSkipTaskbar(!config.showInTaskbar); } catch { /* preview */ }
-      await refresh(true);
-    });
-    return () => { mounted = false; void stopResizeListener.then((unlisten) => unlisten()); if (timer) clearInterval(timer); if (dayBoundaryTimer) clearTimeout(dayBoundaryTimer); };
+      void refresh(true);
+    } catch {
+      if (!appMounted) return;
+      storageUnavailable = true;
+      ready = true;
+    } finally {
+      storageRetrying = false;
+    }
+  }
+
+  onMount(() => {
+    appMounted = true;
+    const appWindow = getCurrentWindow();
+    void Promise.all([appWindow.outerSize(), appWindow.scaleFactor()]).then(([size, scale]) => { windowPixels = size; windowScale = scale; });
+    const stopResizeListener = appWindow.onResized(({ payload }) => { windowPixels = payload; });
+    void initializeApp();
+    return () => { appMounted = false; void stopResizeListener.then((unlisten) => unlisten()); if (timer) clearInterval(timer); if (dayBoundaryTimer) clearTimeout(dayBoundaryTimer); };
   });
 </script>
 
@@ -269,8 +291,15 @@
 <div class:ready class="app-shell" data-accent={accent} style={panelStyle}>
   <div class="frame-corner tl"></div><div class="frame-corner tr"></div><div class="frame-corner bl"></div><div class="frame-corner br"></div>
   <div class="resize-grip" aria-hidden="true" title="Drag to resize; double-click to reset" on:dblclick={resetWindowSize} on:pointerdown={beginResize} on:pointermove={continueResize} on:pointerup={endResize} on:pointercancel={endResize}></div>
-  <Header mode={config.refreshMode} {refreshing} context={view === 'portfolio' ? 'portfolio' : view === 'settings' ? 'settings' : 'ledger'} {privacyHidden} onPrivacy={() => privacyHidden = !privacyHidden} onRefresh={() => void refresh(true)} onSettings={() => view === 'portfolio' ? (view = 'settings') : backToPortfolio()} onClose={closeWindow}/>
-  {#if view === 'settings'}
+  <Header mode={config.refreshMode} {refreshing} context={storageUnavailable ? 'storage' : view === 'portfolio' ? 'portfolio' : view === 'settings' ? 'settings' : 'ledger'} {privacyHidden} onPrivacy={() => privacyHidden = !privacyHidden} onRefresh={() => void refresh(true)} onSettings={() => view === 'portfolio' ? (view = 'settings') : backToPortfolio()} onClose={closeWindow}/>
+  {#if storageUnavailable}
+    <section class="storage-unavailable">
+      <span>LOCAL DATA SAFE / READ INTERRUPTED</span>
+      <h2>STORAGE UNAVAILABLE</h2>
+      <p>The saved portfolio was not replaced. Retry the local data connection before continuing.</p>
+      <button class="apply-button" disabled={storageRetrying} on:click={() => void initializeApp()}>{storageRetrying ? 'RECONNECTING' : 'RETRY LOAD'}</button>
+    </section>
+  {:else if view === 'settings'}
     <SettingsView {config} autoHistoryStartDate={earliestBuyDate(ledger) ?? config.historyStartDate} onApply={applyConfig} onBack={backToPortfolio}/>
   {:else if view === 'new-asset'}
     <AddAssetPanel onBack={backToPortfolio} onAdd={addAsset}/>
