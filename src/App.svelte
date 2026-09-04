@@ -15,7 +15,7 @@
   import { detectPriceSourceTransition, mergeIncomingQuotes, missingQuoteCount, preferredStoredQuotes, resolveFeedState, summarizeHistoryErrors } from './lib/feed';
   import { cachedSeries, shiftDate, syncHistoricalCache } from './lib/history';
   import { availableHistoryRanges, chartHistory, completedHour, EMPTY_HOURLY_CACHE, portfolioChangeSinceLocalMidnight, recordRecentPortfolio } from './lib/hourly';
-  import { deleteLedgerEvent, emptyLedger, ledgerHoldings, previewLedgerEvent, replayLedger, updateLedgerEvent } from './lib/ledger';
+  import { deleteLedgerEvent, emptyLedger, ledgerHoldings, previewLedgerEvent, replayLedger, updateLedgerEvent, updateLedgerEventRemovingAdjustments } from './lib/ledger';
   import { calculateLedgerHistory, EMPTY_LEDGER_PRICE_CACHE, syncLedgerPriceCache } from './lib/ledgerHistory';
   import { isUsEquityExtendedSessionOpen, isUsEquityMarketOpen } from './lib/market';
   import { calculateLedgerPortfolio } from './lib/portfolio';
@@ -165,6 +165,11 @@
     if (!result.ledger) return mutationError(result.issues, event.id);
     await persistLedgerMutation(result.ledger); return undefined;
   }
+  async function saveEventRemovingAdjustments(event: LedgerEvent, adjustmentIds: string[]): Promise<LedgerMutationError | undefined> {
+    const result = updateLedgerEventRemovingAdjustments(ledger, event, adjustmentIds, today());
+    if (!result.ledger) return mutationError(result.issues, event.id);
+    await persistLedgerMutation(result.ledger); return undefined;
+  }
   function previewEvent(event: LedgerEvent): LedgerEventPreviewResult {
     return previewLedgerEvent(ledger, event, today());
   }
@@ -270,7 +275,7 @@
   {:else if view === 'new-asset'}
     <AddAssetPanel onBack={backToPortfolio} onAdd={addAsset}/>
   {:else if view === 'asset' && selectedAsset && selectedPosition}
-    <AssetDetailPanel asset={selectedAsset} position={selectedPosition} quote={selectedQuote} events={ledger.events} initialEventId={selectedEventId} debtRowVisible={config.appearance.showDebt} {privacyHidden} onBack={backToPortfolio} onSave={saveEvent} onDelete={removeEvent} onOpenEvent={openLedgerEvent} {previewEvent} resolvePrice={resolveTransactionPrice}/>
+    <AssetDetailPanel asset={selectedAsset} position={selectedPosition} quote={selectedQuote} events={ledger.events} initialEventId={selectedEventId} debtRowVisible={config.appearance.showDebt} {privacyHidden} onBack={backToPortfolio} onSave={saveEvent} onSaveRemovingAdjustments={saveEventRemovingAdjustments} onDelete={removeEvent} onOpenEvent={openLedgerEvent} {previewEvent} resolvePrice={resolveTransactionPrice}/>
   {:else if view === 'cash' || view === 'debt'}
     <AccountDetailPanel kind={view} balance={view === 'cash' ? account.cash : account.debt} events={ledger.events} activities={replay.activities} assets={ledger.assets} initialEventId={selectedEventId} {privacyHidden} onBack={backToPortfolio} onSave={saveEvent} onDelete={removeEvent} onOpenSource={openAccountSource} onOpenEvent={openLedgerEvent} {previewEvent}/>
   {:else}

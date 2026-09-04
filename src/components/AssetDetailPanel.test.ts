@@ -13,6 +13,7 @@ function props(overrides: Record<string, unknown> = {}) {
   return {
     asset, position, quote: undefined, events: [], onBack: vi.fn(),
     onSave: vi.fn().mockResolvedValue(undefined), onDelete: vi.fn().mockResolvedValue(undefined),
+    onSaveRemovingAdjustments: vi.fn().mockResolvedValue(undefined),
     onOpenEvent: vi.fn(), resolvePrice: vi.fn(), previewEvent: vi.fn().mockReturnValue({ issues: [] }),
     ...overrides
   };
@@ -58,6 +59,25 @@ describe('per-trade Cash and Debt control', () => {
     expect(await screen.findByText('SAVE NOT APPLIED')).toBeTruthy();
     await fireEvent.click(screen.getByRole('button', { name: 'REVIEW' }));
     expect(onOpenEvent).toHaveBeenCalledWith(adjustment.id);
+  });
+
+  it('offers an explicit atomic save when disabling account impact makes a later adjustment redundant', async () => {
+    const buy = { id: 'buy', eventType: 'buy', assetId: asset.id, date: '2026-08-17', sequence: 1, quantity: '2.5', unitPrice: '40', fees: '0', totalAmount: '100', priceSource: 'manual_total', affectsCashDebt: true, createdAt, updatedAt: createdAt } as LedgerEvent;
+    const adjustment = { id: 'adjustment', eventType: 'debt_adjustment', date: '2026-08-29', sequence: 2, amount: '-100', createdAt, updatedAt: createdAt } as LedgerEvent;
+    const failure = { message: 'Debt adjustment would make Debt negative', blockingEventIds: [adjustment.id] };
+    const onSaveRemovingAdjustments = vi.fn().mockResolvedValue(undefined);
+    render(AssetDetailPanel, { props: props({ events: [buy, adjustment], initialEventId: buy.id, onSave: vi.fn().mockResolvedValue(failure), onSaveRemovingAdjustments }) });
+    const toggle = await screen.findByRole('checkbox', { name: /USE TRACKED CASH \/ DEBT/ });
+    expect((toggle as HTMLInputElement).checked).toBe(true);
+    await fireEvent.click(toggle);
+    expect((toggle as HTMLInputElement).checked).toBe(false);
+    await fireEvent.click(screen.getByRole('button', { name: 'SAVE TRANSACTION' }));
+    const combined = await screen.findByRole('button', { name: 'SAVE + REMOVE REDUNDANT ADJUSTMENT' });
+    await fireEvent.click(combined);
+    await waitFor(() => expect(onSaveRemovingAdjustments).toHaveBeenCalledTimes(1));
+    expect(onSaveRemovingAdjustments.mock.calls[0][0]).toMatchObject({ id: buy.id, affectsCashDebt: false });
+    expect(onSaveRemovingAdjustments.mock.calls[0][1]).toEqual([adjustment.id]);
+    expect(await screen.findByText('POSITION')).toBeTruthy();
   });
 
   it('keeps a blocked deletion error inside its confirmation and links the dependent event', async () => {

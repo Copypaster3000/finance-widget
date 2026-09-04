@@ -277,6 +277,33 @@ export function updateLedgerEvent(ledger: PortfolioLedger, event: LedgerEvent, t
   return result.issues.length ? { issues: result.issues } : { ledger: next, issues: [] };
 }
 
+export function isNegativeAccountAdjustment(event: LedgerEvent): boolean {
+  if (event.eventType !== 'cash_adjustment' && event.eventType !== 'debt_adjustment') return false;
+  const amount = parseFixed(event.amount, MONEY_DIGITS, true);
+  return amount !== undefined && amount < 0n;
+}
+
+export function updateLedgerEventRemovingAdjustments(
+  ledger: PortfolioLedger,
+  event: LedgerEvent,
+  adjustmentIds: string[],
+  today?: string
+): { ledger?: PortfolioLedger; issues: LedgerValidationIssue[] } {
+  const ids = new Set(adjustmentIds.filter((id) => id !== event.id));
+  if (!ids.size) return { issues: [{ eventId: event.id, date: event.date, message: 'No redundant account adjustments were selected' }] };
+  const blockedUpdate = updateLedgerEvent(ledger, event, today);
+  if (blockedUpdate.ledger) return { issues: [{ eventId: event.id, date: event.date, message: 'The trade can be saved without removing an account adjustment' }] };
+  const blockingIds = new Set(blockedUpdate.issues.flatMap((issue) => issue.eventId && issue.eventId !== event.id ? [issue.eventId] : []));
+  for (const id of ids) {
+    const candidate = ledger.events.find((item) => item.id === id);
+    if (!candidate || !blockingIds.has(id) || !isNegativeAccountAdjustment(candidate)) {
+      return { issues: [{ eventId: candidate?.id ?? id, date: candidate?.date, message: 'Only listed blocking negative Cash or Debt adjustments can be removed with a trade edit' }] };
+    }
+  }
+  const withoutAdjustments = { ...ledger, events: ledger.events.filter((candidate) => !ids.has(candidate.id)) };
+  return updateLedgerEvent(withoutAdjustments, event, today);
+}
+
 export function previewLedgerEvent(ledger: PortfolioLedger, event: LedgerEvent, today?: string): LedgerEventPreviewResult {
   const before = replayLedger(ledger, undefined, today);
   if (before.issues.length) return { issues: before.issues };

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { deleteLedgerEvent, migrateLegacyHoldings, previewLedgerEvent, replayLedger, sanitizeLedger, updateLedgerEvent } from './ledger';
+import { deleteLedgerEvent, migrateLegacyHoldings, previewLedgerEvent, replayLedger, sanitizeLedger, updateLedgerEvent, updateLedgerEventRemovingAdjustments } from './ledger';
 import type { LedgerAsset, LedgerEvent, PortfolioLedger } from './types';
 
 const createdAt = '2026-08-17T00:00:00.000Z';
@@ -64,6 +64,34 @@ describe('ledger cash and debt accounting', () => {
     expect(updated.issues).toEqual([]);
     expect(replayLedger(updated.ledger!, undefined, '2026-08-29').state).toMatchObject({ cash: 0, debt: 0 });
     expect(replayLedger(updated.ledger!, undefined, '2026-08-29').state.positions[0].quantity).toBe(2.5);
+  });
+
+  it('atomically removes a redundant negative Debt adjustment when a funded Buy becomes external', () => {
+    const purchase = buy('2.5', '100', 1, '2026-08-17');
+    const adjustment = event({ eventType: 'debt_adjustment', date: '2026-08-29', amount: '-100' }, 2);
+    const original = ledger(purchase, adjustment);
+    expect(replayLedger(original, undefined, '2026-08-29').issues).toEqual([]);
+    const external = { ...purchase, affectsCashDebt: false };
+    expect(updateLedgerEvent(original, external, '2026-08-29').ledger).toBeUndefined();
+    const updated = updateLedgerEventRemovingAdjustments(original, external, [adjustment.id], '2026-08-29');
+    expect(updated.issues).toEqual([]);
+    expect(updated.ledger?.events).toEqual([external]);
+    expect(replayLedger(updated.ledger!, undefined, '2026-08-29').state).toMatchObject({ cash: 0, debt: 0 });
+  });
+
+  it('refuses to remove non-negative or non-blocking events during a combined trade edit', () => {
+    const purchase = buy('2.5', '100', 1, '2026-08-17');
+    const positiveAdjustment = event({ eventType: 'debt_adjustment', date: '2026-08-29', amount: '25' }, 2);
+    const blockingAdjustment = event({ eventType: 'debt_adjustment', date: '2026-08-29', amount: '-125' }, 3);
+    const external = { ...purchase, affectsCashDebt: false };
+    const result = updateLedgerEventRemovingAdjustments(ledger(purchase, positiveAdjustment, blockingAdjustment), external, [positiveAdjustment.id], '2026-08-29');
+    expect(result.ledger).toBeUndefined();
+    expect(result.issues[0].message).toContain('Only listed blocking negative Cash or Debt adjustments');
+    const partialAdjustment = event({ eventType: 'debt_adjustment', date: '2026-08-29', amount: '-50' }, 2);
+    const stillFunded = { ...purchase, totalAmount: '75' };
+    const nonBlocking = updateLedgerEventRemovingAdjustments(ledger(purchase, partialAdjustment), stillFunded, [partialAdjustment.id], '2026-08-29');
+    expect(nonBlocking.ledger).toBeUndefined();
+    expect(nonBlocking.issues[0].message).toContain('can be saved without removing');
   });
 
   it('uses sale proceeds to pay debt before increasing cash', () => {

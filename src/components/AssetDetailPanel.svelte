@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { BuyEvent, LedgerAsset, LedgerEvent, LedgerEventPreviewResult, LedgerMutationError, LedgerPositionState, Quote, SellEvent, TransactionPriceResolution } from '../lib/types';
   import { buildTradeEvent, effectiveUnitPrice, hasDecimalInput } from '../lib/transactions';
-  import { nextSequence } from '../lib/ledger';
+  import { isNegativeAccountAdjustment, nextSequence } from '../lib/ledger';
   import { formatQuantity, money, signedMoney } from '../lib/format';
   import Icon from './Icon.svelte';
   import { localCalendarDate } from '../lib/calendar';
@@ -15,6 +15,7 @@
   export let privacyHidden = false;
   export let onBack: () => void;
   export let onSave: (event: LedgerEvent) => Promise<LedgerMutationError | undefined>;
+  export let onSaveRemovingAdjustments: (event: LedgerEvent, adjustmentIds: string[]) => Promise<LedgerMutationError | undefined>;
   export let onDelete: (eventId: string) => Promise<LedgerMutationError | undefined>;
   export let onOpenEvent: (eventId: string) => void;
   export let resolvePrice: (asset: LedgerAsset, date: string) => Promise<TransactionPriceResolution>;
@@ -36,6 +37,7 @@
   let deleteTarget: LedgerEvent | undefined;
   let deleteError: LedgerMutationError | undefined;
   let saveError: LedgerMutationError | undefined;
+  let blockedDraft: LedgerEvent | undefined;
   let openedInitial = '';
 
   $: assetEvents = events.filter((event): event is BuyEvent | SellEvent => (event.eventType === 'buy' || event.eventType === 'sell') && event.assetId === asset.id).sort((a, b) => b.date.localeCompare(a.date) || b.sequence - a.sequence);
@@ -47,6 +49,8 @@
   $: previewResult = transactionPreview(screen, editing, date, quantity, mode, unitPrice, totalAmount, fees, affectsCashDebt, events);
   $: consequence = previewResult?.preview;
   $: saveBlockers = blockingEvents(saveError);
+  $: removableSaveBlockers = saveBlockers.filter(isNegativeAccountAdjustment);
+  $: canRemoveRedundantAdjustments = Boolean(editing && !affectsCashDebt && saveError && saveBlockers.length && removableSaveBlockers.length === saveBlockers.length);
   $: if (initialEventId && initialEventId !== openedInitial) {
     openedInitial = initialEventId;
     const source = assetEvents.find((event) => event.id === initialEventId);
@@ -56,7 +60,8 @@
   function today() {
     return localCalendarDate();
   }
-  function resetForm() { editing = undefined; date = today(); quantity = ''; mode = 'unit'; unitPrice = ''; totalAmount = ''; fees = '0'; affectsCashDebt = true; error = ''; pendingPrice = undefined; deleteTarget = undefined; deleteError = undefined; saveError = undefined; }
+  function resetForm() { editing = undefined; date = today(); quantity = ''; mode = 'unit'; unitPrice = ''; totalAmount = ''; fees = '0'; affectsCashDebt = true; error = ''; pendingPrice = undefined; deleteTarget = undefined; deleteError = undefined; saveError = undefined; blockedDraft = undefined; }
+  function clearSaveFailure() { saveError = undefined; blockedDraft = undefined; }
   function startTrade(side: 'buy' | 'sell', event?: BuyEvent | SellEvent) {
     resetForm(); screen = side;
     if (event) {
@@ -99,7 +104,16 @@
     }, today());
     if (!result.event) { error = result.error ?? 'INVALID TRANSACTION'; return; }
     working = true;
-    const failure = await onSave(result.event); saveError = failure; error = '';
+    const failure = await onSave(result.event); saveError = failure; blockedDraft = failure ? result.event : undefined; error = '';
+    working = false;
+    if (!failure) cancelForm();
+  }
+
+  async function saveRemovingAdjustments() {
+    if (!blockedDraft || !canRemoveRedundantAdjustments) return;
+    working = true;
+    const failure = await onSaveRemovingAdjustments(blockedDraft, removableSaveBlockers.map((event) => event.id));
+    saveError = failure;
     working = false;
     if (!failure) cancelForm();
   }
@@ -169,7 +183,7 @@
       </div>
     </section>
   {:else if screen === 'buy' || screen === 'sell'}
-    <section class="detail-card entry-card">
+    <section class="detail-card entry-card" on:input={clearSaveFailure} on:change={clearSaveFailure}>
       <div class="detail-code">{editing ? 'EDIT' : 'ADD'} {screen.toUpperCase()}</div>
       <div class="form-grid"><label>DATE<input type="date" max={today()} bind:value={date}/></label><label>QUANTITY<input type="number" min="0" step="any" bind:value={quantity}/></label></div>
       <span class="setting-label">{screen === 'buy' ? 'COST INPUT' : 'VALUE INPUT'}</span>
@@ -180,7 +194,7 @@
         <label>{screen === 'buy' ? 'TOTAL PAID / FEES INCLUDED' : 'NET PROCEEDS / AFTER FEES'}<input type="number" min="0" step="0.01" placeholder="AUTO IF BLANK" bind:value={totalAmount}/></label>
         {#if effectiveUnitPrice(totalAmount, quantity)}<p class="form-hint">EFFECTIVE UNIT {money.format(Number(effectiveUnitPrice(totalAmount, quantity)))}</p>{/if}
       {/if}
-      <label class="account-impact-toggle"><input type="checkbox" bind:checked={affectsCashDebt}/><span><b>{screen === 'buy' ? 'USE TRACKED CASH / DEBT' : 'APPLY PROCEEDS TO CASH / DEBT'}</b><i>{affectsCashDebt ? (screen === 'buy' ? 'Cash first, then Margin Debt.' : 'Debt first, then remaining Cash.') : 'This transaction changes holdings and gains only.'}</i></span></label>
+      <label class="account-impact-toggle"><input type="checkbox" bind:checked={affectsCashDebt}/><span class="account-impact-check" aria-hidden="true">{#if affectsCashDebt}<Icon name="check" size={10}/>{/if}</span><span class="account-impact-copy"><b>{screen === 'buy' ? 'USE TRACKED CASH / DEBT' : 'APPLY PROCEEDS TO CASH / DEBT'}</b><i>{affectsCashDebt ? (screen === 'buy' ? 'Cash first, then Margin Debt.' : 'Debt first, then remaining Cash.') : 'This transaction changes holdings and gains only.'}</i></span></label>
       {#if Number.isFinite(previewTotal) && previewTotal > 0}<div class="calculated-total"><span>{screen === 'buy' ? 'TOTAL PAID' : 'NET PROCEEDS'}</span><strong>{money.format(previewTotal)}</strong></div>{/if}
       {#if consequence}<div class="consequence-preview"><span>{screen === 'buy' ? 'FUNDING' : 'PROCEEDS'}</span>
         {#if consequence.cashDelta === 0 && consequence.debtDelta === 0}<p><i>NO CASH / DEBT CHANGE</i></p>{/if}
@@ -193,7 +207,7 @@
       {#if previewResult && !previewResult.preview}<p class="form-hint">PREVIEW UNAVAILABLE / {previewResult.issues[0]?.message ?? 'INVALID DRAFT'}</p>{/if}
       {#if pendingPrice}<div class="price-confirm"><span>MARKET CLOSED ON {date}</span><strong>{pendingPrice.priceDate} / {money.format(Number(pendingPrice.unitPrice))}</strong><div><button on:click={() => void finishTrade(pendingPrice)}>USE CLOSE</button><button on:click={() => { pendingPrice = undefined; mode = 'unit'; unitPrice = ''; }}>ENTER PRICE</button></div></div>{/if}
       {#if error}<p class="form-error">{error}</p>{/if}
-      {#if saveError}<div class="mutation-blocked"><strong>SAVE NOT APPLIED</strong><p>{saveError.message}</p>{#each saveBlockers as blocker}<div><span>{blockingLabel(blocker)}</span><button on:click={() => onOpenEvent(blocker.id)}>REVIEW</button></div>{/each}</div>{/if}
+      {#if saveError}<div class="mutation-blocked"><strong>SAVE NOT APPLIED</strong><p>{saveError.message}</p>{#each saveBlockers as blocker}<div><span>{blockingLabel(blocker)}</span><button on:click={() => onOpenEvent(blocker.id)}>REVIEW</button></div>{/each}{#if canRemoveRedundantAdjustments}<p>Turning off tracked Cash / Debt makes {removableSaveBlockers.length === 1 ? 'this later adjustment' : 'these later adjustments'} redundant. Confirm to remove {removableSaveBlockers.length === 1 ? 'it' : 'them'} and save the trade together.</p><button class="confirm-combined" disabled={working} on:click={() => void saveRemovingAdjustments()}>SAVE + REMOVE REDUNDANT ADJUSTMENT{removableSaveBlockers.length === 1 ? '' : 'S'}</button>{/if}</div>{/if}
       <button class="apply-button full-action" disabled={working} on:click={() => void submitTrade()}><Icon name="check" size={13}/>{working ? 'WORKING' : editing ? 'SAVE TRANSACTION' : `ADD ${screen.toUpperCase()}`}</button>
       {#if editing}<button class="danger-action" on:click={() => editing && beginDelete(editing)}>DELETE TRANSACTION</button>{/if}
     </section>
