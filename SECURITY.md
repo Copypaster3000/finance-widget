@@ -21,7 +21,7 @@ cargo tree --manifest-path src-tauri/Cargo.toml --locked --target x86_64-unknown
 
 The Windows command reports nothing to print; the Linux command shows the GTK/WebKit dependency chain. Cargo resolves platform-specific dependencies for all platforms when maintaining its lockfile, so removing these lockfile entries is not a durable fix.
 
-Disposition: dismiss this specific Dependabot alert as `vulnerable_code_not_used` for the Windows-only release. Keep dependency monitoring enabled without a blanket package ignore. Reassess this decision before adding another release target or if a dependency/feature change includes `glib` in the Windows build.
+Disposition: dismiss this specific Dependabot alert as "Vulnerable code not used" (API reason `not_used`) for the Windows-only release. Keep dependency monitoring enabled without a blanket package ignore. Reassess this decision before adding another release target or if a dependency/feature change includes `glib` in the Windows build.
 
 References: [RustSec advisory](https://rustsec.org/advisories/RUSTSEC-2024-0429.html), [Cargo platform-specific dependency resolution](https://doc.rust-lang.org/cargo/reference/resolver.html#dependency-kinds).
 
