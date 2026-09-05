@@ -52,6 +52,8 @@ Historical value replays the ledger through each chart point and values the reco
 
 Configuration, transactions, quote caches, historical prices, and window state are stored locally under the Tauri application-data directory for `com.copypaster3000.finance-widget`.
 
+On Windows, portfolio records live in `%APPDATA%\com.copypaster3000.finance-widget\portfolio.json`, independently of the executable. Saves replace the file atomically and retain the previous valid file as `portfolio.json.bak`. A damaged file can recover from that backup; unreadable storage stops loading with an error instead of silently opening an empty portfolio. A second running copy cannot overwrite changes it has not loaded. Keep separate backups for long-term recovery; the automatic backup contains only the previous save.
+
 Only requested symbols and historical time bounds are sent to the market-data source. Quantities, transaction records, Cash, Debt, cost basis, totals, and gains remain local. The app does not collect API credentials or telemetry.
 
 Repository examples, screenshots, and tests use synthetic data. Please do not attach real portfolio values, local stores, or unredacted screenshots to public issues.
@@ -92,6 +94,7 @@ The NSIS installer is written to `src-tauri/target/release/bundle/nsis`.
 - `src/lib/feed.ts` — quote provenance, cache preference, and feed state.
 - `src/lib/calendar.ts` — local calendar boundaries and provider-timezone conversion.
 - `src/lib/storage.ts` — schema migration and app-data persistence.
+- `src-tauri/src/persistence.rs` — validated native reads, atomic saves, recovery backup, and conflicting-write protection.
 - `src/components` — portfolio, configuration, transaction, Cash, and Debt views.
 - `src-tauri` — frameless Windows shell, native integration, and installer.
 

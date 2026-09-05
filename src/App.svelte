@@ -20,7 +20,7 @@
   import { isUsEquityExtendedSessionOpen, isUsEquityMarketOpen } from './lib/market';
   import { calculateLedgerPortfolio } from './lib/portfolio';
   import { createProvider } from './lib/providers';
-  import { loadState, saveConfig, saveHistoryCache, saveHourlyHistory, saveLedger, saveLedgerPriceCache, saveQuotes } from './lib/storage';
+  import { loadState, saveConfig, saveHistoryCache, saveHourlyHistory, saveLedger, saveLedgerState, saveLedgerPriceCache, saveQuotes } from './lib/storage';
   import type { AccountActivity, AppConfig, AssetType, FeedStatus, HistoricalCache, HistoryRange, LedgerAsset, LedgerEvent, LedgerEventPreviewResult, LedgerMutationError, LedgerPriceCache, PortfolioHourlyCache, PortfolioLedger, Quote, RefreshMode, TransactionPriceResolution } from './lib/types';
 
   type View = 'portfolio' | 'settings' | 'asset' | 'cash' | 'debt' | 'new-asset';
@@ -37,6 +37,7 @@
   let refreshing = false;
   let ready = false;
   let storageUnavailable = false;
+  let storageDetail = '';
   let storageRetrying = false;
   let appMounted = false;
   let feed: FeedStatus = { state: 'idle', lastCheckedAt: 0, lastQuoteReceivedAt: 0 };
@@ -145,9 +146,9 @@
     if (next.historyStartMode === 'auto') next = { ...next, historyStartDate: earliestBuyDate(ledger) ?? next.historyStartDate };
     const startupChanged = next.launchAtStartup !== config.launchAtStartup;
     const historyChanged = next.historyStartDate !== config.historyStartDate || next.historyStartMode !== config.historyStartMode;
-    config = next; view = 'portfolio'; historyAttemptedThrough = '';
-    if (historyChanged) { ledgerPriceCache = structuredClone(EMPTY_LEDGER_PRICE_CACHE); await saveLedgerPriceCache(ledgerPriceCache); }
-    await saveConfig(config); schedule(config.refreshMode);
+    const nextPrices = historyChanged ? structuredClone(EMPTY_LEDGER_PRICE_CACHE) : ledgerPriceCache;
+    await saveLedgerState(ledger, next, hourlyHistory, nextPrices);
+    config = next; ledgerPriceCache = nextPrices; view = 'portfolio'; historyAttemptedThrough = ''; schedule(config.refreshMode);
     try { await getCurrentWindow().setAlwaysOnTop(config.windowMode === 'alwaysOnTop'); await getCurrentWindow().setSkipTaskbar(!config.showInTaskbar); if (startupChanged) { const enabled = await isEnabled(); if (config.launchAtStartup && !enabled) await enable(); if (!config.launchAtStartup && enabled) await disable(); } } catch { /* preview */ }
     await refresh(true);
   }
@@ -157,21 +158,24 @@
   }
   async function persistLedgerMutation(nextLedger: PortfolioLedger) {
     const previousHistoryStart = resolveHistoryStart(config, ledger);
-    ledger = nextLedger; historyAttemptedThrough = ''; hourlyHistory = { ...hourlyHistory, recentPoints: [] };
-    if (config.historyStartMode === 'auto') config = { ...config, historyStartDate: earliestBuyDate(ledger) ?? config.historyStartDate };
-    const nextHistoryStart = resolveHistoryStart(config, ledger);
-    if (nextHistoryStart < previousHistoryStart) ledgerPriceCache = structuredClone(EMPTY_LEDGER_PRICE_CACHE);
-    await Promise.all([saveLedger(ledger), saveHourlyHistory(hourlyHistory), saveConfig(config), saveLedgerPriceCache(ledgerPriceCache)]); void refresh(true);
+    const nextConfig = config.historyStartMode === 'auto' ? { ...config, historyStartDate: earliestBuyDate(nextLedger) ?? config.historyStartDate } : config;
+    const nextHourly = { ...hourlyHistory, recentPoints: [] };
+    const nextPrices = resolveHistoryStart(nextConfig, nextLedger) < previousHistoryStart ? structuredClone(EMPTY_LEDGER_PRICE_CACHE) : ledgerPriceCache;
+    await saveLedgerState(nextLedger, nextConfig, nextHourly, nextPrices);
+    ledger = nextLedger; config = nextConfig; hourlyHistory = nextHourly; ledgerPriceCache = nextPrices; historyAttemptedThrough = '';
+    void refresh(true);
   }
   async function saveEvent(event: LedgerEvent): Promise<LedgerMutationError | undefined> {
     const result = updateLedgerEvent(ledger, event, today());
     if (!result.ledger) return mutationError(result.issues, event.id);
-    await persistLedgerMutation(result.ledger); return undefined;
+    try { await persistLedgerMutation(result.ledger); return undefined; }
+    catch (error) { return { message: `Save failed: ${String(error)}`, blockingEventIds: [] }; }
   }
   async function saveEventRemovingAdjustments(event: LedgerEvent, adjustmentIds: string[]): Promise<LedgerMutationError | undefined> {
     const result = updateLedgerEventRemovingAdjustments(ledger, event, adjustmentIds, today());
     if (!result.ledger) return mutationError(result.issues, event.id);
-    await persistLedgerMutation(result.ledger); return undefined;
+    try { await persistLedgerMutation(result.ledger); return undefined; }
+    catch (error) { return { message: `Save failed: ${String(error)}`, blockingEventIds: [] }; }
   }
   function previewEvent(event: LedgerEvent): LedgerEventPreviewResult {
     return previewLedgerEvent(ledger, event, today());
@@ -179,7 +183,8 @@
   async function removeEvent(eventId: string): Promise<LedgerMutationError | undefined> {
     const result = deleteLedgerEvent(ledger, eventId, today());
     if (!result.ledger) return mutationError(result.issues, eventId);
-    await persistLedgerMutation(result.ledger); return undefined;
+    try { await persistLedgerMutation(result.ledger); return undefined; }
+    catch (error) { return { message: `Save failed: ${String(error)}`, blockingEventIds: [] }; }
   }
   async function addAsset(symbol: string, type: AssetType): Promise<string | undefined> {
     if (ledger.assets.some((asset) => asset.type === type && asset.symbol === symbol)) return 'ASSET ALREADY EXISTS';
@@ -188,8 +193,9 @@
       const result = await createProvider(config.stockSession === 'extended').getQuotes([holding]); const quote = result.quotes[0];
       if (!quote) return result.errors[0] ?? 'SYMBOL COULD NOT BE RESOLVED';
       const asset: LedgerAsset = { id, symbol, type, createdAt: new Date().toISOString() };
-      ledger = { ...ledger, assets: [...ledger.assets, asset] }; quotes = [quote, ...quotes];
-      await Promise.all([saveLedger(ledger), saveQuotes(quotes)]); selectedAssetId = id; view = 'asset'; return undefined;
+      const nextLedger = { ...ledger, assets: [...ledger.assets, asset] };
+      await saveLedger(nextLedger); ledger = nextLedger; quotes = [quote, ...quotes];
+      selectedAssetId = id; view = 'asset'; void saveQuotes(quotes).catch(() => undefined); return undefined;
     } catch (error) { return error instanceof Error ? error.message : 'SYMBOL VALIDATION FAILED'; }
   }
   async function resolveTransactionPrice(asset: LedgerAsset, date: string): Promise<TransactionPriceResolution> {
@@ -267,8 +273,9 @@
       ready = true; schedule(config.refreshMode); scheduleDayBoundary();
       try { await getCurrentWindow().setAlwaysOnTop(config.windowMode === 'alwaysOnTop'); await getCurrentWindow().setSkipTaskbar(!config.showInTaskbar); } catch { /* preview */ }
       void refresh(true);
-    } catch {
+    } catch (error) {
       if (!appMounted) return;
+      storageDetail = String(error);
       storageUnavailable = true;
       ready = true;
     } finally {
@@ -294,9 +301,10 @@
   <Header mode={config.refreshMode} {refreshing} context={storageUnavailable ? 'storage' : view === 'portfolio' ? 'portfolio' : view === 'settings' ? 'settings' : 'ledger'} {privacyHidden} onPrivacy={() => privacyHidden = !privacyHidden} onRefresh={() => void refresh(true)} onSettings={() => view === 'portfolio' ? (view = 'settings') : backToPortfolio()} onClose={closeWindow}/>
   {#if storageUnavailable}
     <section class="storage-unavailable">
-      <span>LOCAL DATA SAFE / READ INTERRUPTED</span>
+      <span>LOCAL STORAGE / LOAD INTERRUPTED</span>
       <h2>STORAGE UNAVAILABLE</h2>
-      <p>The saved portfolio was not replaced. Retry the local data connection before continuing.</p>
+      <p>Unable to open the saved portfolio. Retry the local data connection before continuing.</p>
+      <p>{storageDetail}</p>
       <button class="apply-button" disabled={storageRetrying} on:click={() => void initializeApp()}>{storageRetrying ? 'RECONNECTING' : 'RETRY LOAD'}</button>
     </section>
   {:else if view === 'settings'}

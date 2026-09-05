@@ -1,4 +1,5 @@
 use std::sync::Mutex;
+mod persistence;
 use tauri::Manager;
 use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_window_state::{StateFlags, WindowExt};
@@ -76,8 +77,8 @@ pub fn run() {
         .expect("failed to create Yahoo HTTP client");
     tauri::Builder::default()
         .manage(YahooSession { client: yahoo_client, crumb: Mutex::new(None) })
-        .invoke_handler(tauri::generate_handler![fetch_yahoo_session_quotes])
-        .plugin(tauri_plugin_store::Builder::new().build())
+        .manage(persistence::Persistence::default())
+        .invoke_handler(tauri::generate_handler![fetch_yahoo_session_quotes, persistence::load_portfolio, persistence::save_portfolio])
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))

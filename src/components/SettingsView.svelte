@@ -1,13 +1,16 @@
 <script lang="ts">
   import Icon from './Icon.svelte';
+  import { version } from '../../package.json';
   import { localCalendarDate } from '../lib/calendar';
   import type { AppConfig, RefreshMode } from '../lib/types';
   export let config: AppConfig;
   export let autoHistoryStartDate: string;
-  export let onApply: (config: AppConfig) => void;
+  export let onApply: (config: AppConfig) => void | Promise<void>;
   export let onBack: () => void;
 
   let draft: AppConfig;
+  let saveError = '';
+  let saving = false;
   const today = localCalendarDate();
   function initializeDraft(source: AppConfig, automaticDate: string): AppConfig {
     const next = structuredClone(source);
@@ -27,7 +30,13 @@
   };
 
   function adjustTextScale(delta: number) { draft.appearance.scale = Math.round(Math.min(1.4, Math.max(0.8, draft.appearance.scale + delta)) * 10) / 10; }
-  function apply() { onApply({ ...draft, schemaVersion: 10, historyStartDate: draft.historyStartDate || autoHistoryStartDate }); }
+  async function apply() {
+    if (saving) return;
+    saving = true; saveError = '';
+    try { await onApply({ ...draft, schemaVersion: 10, historyStartDate: draft.historyStartDate || autoHistoryStartDate }); }
+    catch (error) { saveError = `Save failed: ${String(error)}`; }
+    finally { saving = false; }
+  }
   function useAutomaticHistoryStart() { draft.historyStartMode = 'auto'; draft.historyStartDate = autoHistoryStartDate; }
 </script>
 
@@ -67,5 +76,6 @@
     <p class="setting-note">Account-row visibility only. Hidden balances still affect net value and history.</p>
   </section>
 
-  <div class="settings-footer"><span>SCHEMA 10 / LOCAL LEDGER</span><button class="apply-button" on:click={apply}><Icon name="check" size={14}/> APPLY CONFIG</button></div>
+  {#if saveError}<p class="form-error" role="alert">{saveError}</p>{/if}
+  <div class="settings-footer"><span>V{version} / LOCAL LEDGER</span><button class="apply-button" disabled={saving} on:click={apply}><Icon name="check" size={14}/> {saving ? 'SAVING' : 'APPLY CONFIG'}</button></div>
 </main>

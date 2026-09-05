@@ -37,4 +37,5 @@ jobs:
           cache: npm
       - uses: dtolnay/rust-toolchain@stable
       - run: npm ci
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --lib
       - run: npm run tauri build
