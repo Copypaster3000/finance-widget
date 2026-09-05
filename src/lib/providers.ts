@@ -2,6 +2,8 @@ import { fetch } from '@tauri-apps/plugin-http';
 import { invoke } from '@tauri-apps/api/core';
 import { MOCK_QUOTES } from './defaults';
 import { datesBetween } from './history';
+import { FUTURE_TOLERANCE } from './quotePolicy';
+import { MAX_PRICE } from './decimal';
 import type { HistoricalPricePoint, HistoricalResult, HistoricalSeries, Holding, HourlyPricePoint, HourlyResult, HourlySeries, PriceProvider, Quote, QuoteResult } from './types';
 
 function uniqueHoldings(holdings: Holding[]): Holding[] {
@@ -103,6 +105,7 @@ function yahooResult(payload: YahooChartPayload, holding: Holding): YahooChartRe
   if (error) throw new Error(`${holding.symbol}: Yahoo ${error}`);
   const result = payload.chart?.result?.[0];
   if (!result) throw new Error(`${holding.symbol}: Yahoo quote unavailable`);
+  if (result.meta?.currency !== 'USD') throw new Error(`${holding.symbol}: UNSUPPORTED CURRENCY / ${result.meta?.currency ?? 'UNKNOWN'}`);
   return result;
 }
 
@@ -110,13 +113,13 @@ export function normalizeYahooQuote(payload: YahooChartPayload, holding: Holding
   const result = yahooResult(payload, holding);
   const meta = result.meta ?? {};
   const regularPrice = Number(meta.regularMarketPrice);
-  if (!Number.isFinite(regularPrice) || regularPrice <= 0) throw new Error(`${holding.symbol}: Yahoo market price unavailable`);
+  if (!Number.isFinite(regularPrice) || regularPrice <= 0 || regularPrice > MAX_PRICE) throw new Error(`${holding.symbol}: Yahoo market price unavailable or outside supported range`);
   const regularTimestamp = Number(meta.regularMarketTime);
   const timestamps = Array.isArray(result.timestamp) ? result.timestamp : [];
   const intradayCloses = result.indicators?.quote?.[0]?.close ?? [];
   const latestBar = timestamps.reduce<{ price: number; timestamp: number } | undefined>((latest, timestamp, index) => {
     const price = Number(intradayCloses[index]);
-    return Number.isFinite(timestamp) && timestamp > 0 && Number.isFinite(price) && price > 0 && (!latest || timestamp > latest.timestamp)
+    return Number.isFinite(timestamp) && timestamp > 0 && timestamp * 1000 <= Date.now() + FUTURE_TOLERANCE && Number.isFinite(price) && price > 0 && price <= MAX_PRICE && (!latest || timestamp > latest.timestamp)
       ? { price, timestamp }
       : latest;
   }, undefined);
@@ -133,6 +136,7 @@ export function normalizeYahooQuote(payload: YahooChartPayload, holding: Holding
     ? regularPreviousClose
     : (derivedPreviousClose ?? legacyPreviousClose);
   const timestamp = useExtendedBar ? latestBar.timestamp : regularTimestamp;
+  if (Number.isFinite(timestamp) && timestamp * 1000 > Date.now() + FUTURE_TOLERANCE) throw new Error(`${holding.symbol}: invalid future market timestamp`);
   const hasPreviousClose = Number.isFinite(previousClose) && previousClose > 0;
   const change = hasPreviousClose ? price - previousClose : undefined;
   return {
@@ -143,7 +147,8 @@ export function normalizeYahooQuote(payload: YahooChartPayload, holding: Holding
     previousClose: hasPreviousClose ? previousClose : undefined,
     change,
     changePercent: change !== undefined ? (change / previousClose) * 100 : undefined,
-    timestamp: Number.isFinite(timestamp) && timestamp > 0 ? timestamp * 1000 : Date.now(),
+    timestamp: Number.isFinite(timestamp) && timestamp > 0 ? timestamp * 1000 : 0,
+    receivedAt: Date.now(), session: includeExtendedHours ? 'extended' : 'regular',
     provider: 'Yahoo Finance',
     status: 'delayed'
   };
@@ -151,6 +156,7 @@ export function normalizeYahooQuote(payload: YahooChartPayload, holding: Holding
 
 export function applyYahooSessionQuote(quote: Quote, sessionQuote: YahooSessionQuote | undefined, holding: Holding): Quote {
   if (!sessionQuote || holding.type !== 'stock') return quote;
+  if (sessionQuote.currency !== 'USD') return quote;
   const candidates = [
     [sessionQuote.regularMarketPrice, sessionQuote.regularMarketTime],
     [sessionQuote.preMarketPrice, sessionQuote.preMarketTime],
@@ -159,7 +165,7 @@ export function applyYahooSessionQuote(quote: Quote, sessionQuote: YahooSessionQ
   ].flatMap(([rawPrice, rawTimestamp]) => {
     const price = Number(rawPrice);
     const timestamp = Number(rawTimestamp);
-    return Number.isFinite(price) && price > 0 && Number.isFinite(timestamp) && timestamp > 0
+    return Number.isFinite(price) && price > 0 && price <= MAX_PRICE && Number.isFinite(timestamp) && timestamp > 0 && timestamp * 1000 <= Date.now() + FUTURE_TOLERANCE
       ? [{ price, timestamp: timestamp * 1000 }]
       : [];
   });
@@ -186,9 +192,10 @@ export function normalizeYahooHistory(payload: YahooChartPayload, holding: Holdi
   const closes = result.indicators?.quote?.[0]?.close;
   if (!Array.isArray(closes)) throw new Error(`${holding.symbol}: Yahoo history unavailable`);
   const points = timestamps.flatMap((timestamp, index) => {
+    if (!Number.isFinite(timestamp) || timestamp <= 0 || timestamp * 1000 > Date.now() + FUTURE_TOLERANCE) return [];
     const date = new Date(timestamp * 1000).toISOString().slice(0, 10);
     const price = Number(closes[index]);
-    return date >= startDate && date <= endDate && Number.isFinite(price) && price > 0 ? [{ date, price }] : [];
+    return date >= startDate && date <= endDate && Number.isFinite(price) && price > 0 && price <= MAX_PRICE ? [{ date, price }] : [];
   });
   if (timestamps.length && !points.length) throw new Error(`${holding.symbol}: malformed Yahoo history`);
   return [...new Map(points.map((point) => [point.date, point])).values()].sort((a, b) => a.date.localeCompare(b.date));
@@ -200,11 +207,12 @@ export function normalizeYahooHourly(payload: YahooChartPayload, holding: Holdin
   const closes = result.indicators?.quote?.[0]?.close;
   if (!Array.isArray(closes)) throw new Error(`${holding.symbol}: Yahoo hourly history unavailable`);
   const points = timestamps.flatMap((timestamp, index) => {
+    if (!Number.isFinite(timestamp) || timestamp <= 0 || timestamp * 1000 > Date.now() + FUTURE_TOLERANCE) return [];
     const date = new Date(timestamp * 1000);
     date.setUTCMinutes(0, 0, 0);
     const iso = date.toISOString();
     const price = Number(closes[index]);
-    return iso >= startTime && iso <= endTime && Number.isFinite(price) && price > 0 ? [{ timestamp: iso, price }] : [];
+    return iso >= startTime && iso <= endTime && Number.isFinite(price) && price > 0 && price <= MAX_PRICE ? [{ timestamp: iso, price }] : [];
   });
   if (timestamps.length && !points.length) throw new Error(`${holding.symbol}: malformed Yahoo hourly history`);
   return [...new Map(points.map((point) => [point.timestamp, point])).values()].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
@@ -245,7 +253,7 @@ export class YahooFinanceProvider implements PriceProvider {
     const results = await Promise.allSettled(unique.map(async (holding) => {
       const useIntraday = this.includeExtendedHours && holding.type === 'stock';
       const params = yahooQuoteParams(holding, this.includeExtendedHours);
-      const response = await fetch(this.url(holding, params), { method: 'GET' });
+      const response = await fetch(this.url(holding, params), { method: 'GET', connectTimeout: 8_000, signal: AbortSignal.timeout(15_000) });
       if (!response.ok) throw new Error(`${holding.symbol}: Yahoo HTTP ${response.status}`);
       return normalizeYahooQuote(await response.json() as YahooChartPayload, holding, useIntraday);
     }));
@@ -269,7 +277,7 @@ export class YahooFinanceProvider implements PriceProvider {
         interval: '1d',
         events: 'history'
       });
-      const response = await fetch(this.url(holding, params), { method: 'GET' });
+      const response = await fetch(this.url(holding, params), { method: 'GET', connectTimeout: 8_000, signal: AbortSignal.timeout(15_000) });
       if (!response.ok) throw new Error(`${holding.symbol}: Yahoo history HTTP ${response.status}`);
       return {
         symbol: holding.symbol.toUpperCase(),
@@ -289,7 +297,7 @@ export class YahooFinanceProvider implements PriceProvider {
   async getHourlyPrices(holdings: Holding[], startTime: string, endTime: string): Promise<HourlyResult> {
     const results = await Promise.allSettled(uniqueHoldings(holdings).map(async (holding) => {
       const params = yahooHourlyParams(holding, startTime, endTime, this.includeExtendedHours);
-      const response = await fetch(this.url(holding, params), { method: 'GET' });
+      const response = await fetch(this.url(holding, params), { method: 'GET', connectTimeout: 8_000, signal: AbortSignal.timeout(15_000) });
       if (!response.ok) throw new Error(`${holding.symbol}: Yahoo hourly HTTP ${response.status}`);
       return {
         symbol: holding.symbol.toUpperCase(), assetType: holding.type,

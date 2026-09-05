@@ -1,4 +1,4 @@
-import { divideRounded, fixedToNumber, formatFixed, MONEY_DIGITS, parseFixed, PRICE_DIGITS, QUANTITY_DIGITS } from './decimal';
+import { divideRounded, fixedToNumber, formatFixed, MONEY_DIGITS, parseFixed, PRICE_DIGITS, QUANTITY_DIGITS, safeNumber } from './decimal';
 import { localCalendarDate } from './calendar';
 import { isIsoDate } from './history';
 import type {
@@ -77,7 +77,7 @@ function positionState(position: WorkingPosition): LedgerPositionState {
     quantity: fixedToNumber(position.quantity, QUANTITY_DIGITS),
     quantityDecimal: formatFixed(position.quantity, QUANTITY_DIGITS),
     remainingCostBasis: costBasis === undefined ? undefined : fixedToNumber(costBasis, MONEY_DIGITS),
-    averageCost: costBasis === undefined || position.quantity === 0n ? undefined : Number(costBasis) / Number(position.quantity) * 10 ** (QUANTITY_DIGITS - MONEY_DIGITS),
+    averageCost: costBasis === undefined || position.quantity === 0n ? undefined : safeNumber(Number(costBasis) / Number(position.quantity) * 10 ** (QUANTITY_DIGITS - MONEY_DIGITS)),
     realizedGain: position.realizedKnown ? fixedToNumber(position.realizedGain, MONEY_DIGITS) : undefined,
     lots
   };
@@ -87,7 +87,7 @@ function issue(issues: LedgerValidationIssue[], event: LedgerEvent | undefined, 
   issues.push({ eventId: event?.id, date: event?.date, message });
 }
 
-export function replayLedger(ledgerValue: PortfolioLedger, asOfDate?: string, today = localDate()): LedgerReplayResult {
+export function createLedgerCursor(ledgerValue: PortfolioLedger, today = localDate()) {
   const ledger = ledgerValue?.schemaVersion === 2 ? ledgerValue : EMPTY_LEDGER;
   const issues: LedgerValidationIssue[] = [];
   const activities: AccountActivity[] = [];
@@ -123,41 +123,39 @@ export function replayLedger(ledgerValue: PortfolioLedger, asOfDate?: string, to
     });
   }
   const eventIds = new Set<string>();
-  const events = [...(Array.isArray(ledger.events) ? ledger.events : [])].sort(compareLedgerEvents);
-  for (const event of events) {
-    if (asOfDate && event.date > asOfDate) continue;
-    if (!event.id || eventIds.has(event.id)) { issue(issues, event, 'Duplicate or missing transaction ID'); continue; }
+  function apply(event: LedgerEvent) {
+    if (!event.id || eventIds.has(event.id)) { issue(issues, event, 'Duplicate or missing transaction ID'); return; }
     eventIds.add(event.id);
     if (!isIsoDate(event.date) || event.date > today || !Number.isSafeInteger(event.sequence) || event.sequence < 1) {
       issue(issues, event, 'Transaction has an invalid date or sequence');
-      continue;
+      return;
     }
 
     if (event.eventType === 'buy' || event.eventType === 'sell') {
       const position = positions.get(event.assetId);
       const quantity = parseFixed(event.quantity, QUANTITY_DIGITS);
-      if (!position) { issue(issues, event, 'Transaction references an unknown asset'); continue; }
-      if (quantity === undefined || quantity <= 0n) { issue(issues, event, 'Quantity must be greater than zero'); continue; }
+      if (!position) { issue(issues, event, 'Transaction references an unknown asset'); return; }
+      if (quantity === undefined || quantity <= 0n) { issue(issues, event, 'Quantity must be greater than zero'); return; }
 
       const unknownExternalBuy = event.eventType === 'buy' && event.affectsCashDebt === false && event.priceSource === 'legacy_unknown' && event.totalAmount === undefined && event.unitPrice === undefined;
       if (unknownExternalBuy) {
         position.quantity += quantity;
         position.lots.push({ sourceEventId: event.id, acquiredDate: event.date, quantity, costBasis: undefined });
-        continue;
+        return;
       }
 
       const amount = money(event.totalAmount, event.eventType === 'buy');
       const fees = parseFixed(event.fees, MONEY_DIGITS);
       const unitPrice = parseFixed(event.unitPrice, 6);
-      if (amount === undefined || amount < 0n || fees === undefined || fees < 0n || unitPrice === undefined || unitPrice <= 0n) {
+      if (amount === undefined || amount < 0n || fees === undefined || fees < 0n || unitPrice === undefined || unitPrice < 0n || (event.eventType === 'buy' && unitPrice === 0n)) {
         issue(issues, event, 'Transaction amount, price, or fees are invalid');
-        continue;
+        return;
       }
 
       if (event.eventType === 'buy') {
         position.quantity += quantity;
         position.lots.push({ sourceEventId: event.id, acquiredDate: event.date, quantity, costBasis: amount });
-        if (!event.affectsCashDebt) continue;
+        if (!event.affectsCashDebt) return;
         const cashBefore = cash;
         const debtBefore = debt;
         const fromCash = cash < amount ? cash : amount;
@@ -165,12 +163,12 @@ export function replayLedger(ledgerValue: PortfolioLedger, asOfDate?: string, to
         debt += amount - fromCash;
         recordActivity(event, 'cash', 'buy_funding', cashBefore, cash, 'asset', event.assetId);
         recordActivity(event, 'debt', 'buy_funding', debtBefore, debt, 'asset', event.assetId);
-        continue;
+        return;
       }
 
       if (quantity > position.quantity) {
         issue(issues, event, `${position.asset.symbol}: sell exceeds ${formatFixed(position.quantity, QUANTITY_DIGITS)} units owned on ${event.date}`);
-        continue;
+        return;
       }
       let remaining = quantity;
       let removedBasis = 0n;
@@ -192,7 +190,7 @@ export function replayLedger(ledgerValue: PortfolioLedger, asOfDate?: string, to
       position.quantity -= quantity;
       if (basisKnown) position.realizedGain += amount - removedBasis;
       else position.realizedKnown = false;
-      if (!event.affectsCashDebt) continue;
+      if (!event.affectsCashDebt) return;
       const cashBefore = cash;
       const debtBefore = debt;
       const debtPayment = debt < amount ? debt : amount;
@@ -200,14 +198,14 @@ export function replayLedger(ledgerValue: PortfolioLedger, asOfDate?: string, to
       cash += amount - debtPayment;
       recordActivity(event, 'debt', 'sale_proceeds', debtBefore, debt, 'asset', event.assetId);
       recordActivity(event, 'cash', 'sale_proceeds', cashBefore, cash, 'asset', event.assetId);
-      continue;
+      return;
     }
 
     const adjustment = event.eventType === 'cash_adjustment' || event.eventType === 'debt_adjustment';
     const amount = money(event.amount, !adjustment);
     if (amount === undefined || (adjustment ? amount === 0n : amount <= 0n)) {
       issue(issues, event, 'Cash or debt amount is invalid');
-      continue;
+      return;
     }
     if (event.eventType === 'cash_opening') {
       const before = cash;
@@ -236,19 +234,19 @@ export function replayLedger(ledgerValue: PortfolioLedger, asOfDate?: string, to
       recordActivity(event, 'cash', 'withdrawal_funding', cashBefore, cash, 'cash');
       recordActivity(event, 'debt', 'withdrawal_funding', debtBefore, debt, 'cash');
     } else if (event.eventType === 'cash_adjustment') {
-      if (cash + amount < 0n) { issue(issues, event, 'Cash adjustment would make Cash negative'); continue; }
+      if (cash + amount < 0n) { issue(issues, event, 'Cash adjustment would make Cash negative'); return; }
       const before = cash;
       cash += amount;
       recordActivity(event, 'cash', 'manual_adjustment', before, cash, 'cash');
     } else if (event.eventType === 'debt_adjustment') {
-      if (debt + amount < 0n) { issue(issues, event, 'Debt adjustment would make Debt negative'); continue; }
+      if (debt + amount < 0n) { issue(issues, event, 'Debt adjustment would make Debt negative'); return; }
       const before = debt;
       debt += amount;
       recordActivity(event, 'debt', 'manual_adjustment', before, debt, 'debt');
     } else if (event.eventType === 'debt_payment') {
-      if (amount > debt) { issue(issues, event, 'Debt payment exceeds the current Debt balance'); continue; }
-      if (event.source !== 'external' && event.source !== 'cash') { issue(issues, event, 'Debt payment source is invalid'); continue; }
-      if (event.source === 'cash' && amount > cash) { issue(issues, event, 'Debt payment exceeds available Cash'); continue; }
+      if (amount > debt) { issue(issues, event, 'Debt payment exceeds the current Debt balance'); return; }
+      if (event.source !== 'external' && event.source !== 'cash') { issue(issues, event, 'Debt payment source is invalid'); return; }
+      if (event.source === 'cash' && amount > cash) { issue(issues, event, 'Debt payment exceeds available Cash'); return; }
       const cashBefore = cash;
       const debtBefore = debt;
       if (event.source === 'cash') cash -= amount;
@@ -258,23 +256,33 @@ export function replayLedger(ledgerValue: PortfolioLedger, asOfDate?: string, to
     }
   }
 
-  return {
+  function snapshot(asOfDate?: string, compact = false): LedgerReplayResult { return {
     state: {
       asOfDate,
       cash: fixedToNumber(cash, MONEY_DIGITS),
       debt: fixedToNumber(debt, MONEY_DIGITS),
-      positions: [...positions.values()].map(positionState)
+      positions: [...positions.values()].map(p => compact ? { asset: p.asset, quantity: fixedToNumber(p.quantity, QUANTITY_DIGITS), quantityDecimal: formatFixed(p.quantity, QUANTITY_DIGITS), lots: [] } : positionState(p))
     },
     issues,
     activities
   };
+  }
+  return { apply, snapshot };
+}
+
+export function replayLedger(ledger: PortfolioLedger, asOfDate?: string, today = localDate()): LedgerReplayResult {
+  const cursor = createLedgerCursor(ledger, today);
+  for (const event of [...ledger.events].sort(compareLedgerEvents)) if (!asOfDate || event.date <= asOfDate) cursor.apply(event);
+  return cursor.snapshot(asOfDate);
 }
 
 export function updateLedgerEvent(ledger: PortfolioLedger, event: LedgerEvent, today?: string): { ledger?: PortfolioLedger; issues: LedgerValidationIssue[] } {
   const exists = ledger.events.some((candidate) => candidate.id === event.id);
   const next = { ...ledger, events: exists ? ledger.events.map((candidate) => candidate.id === event.id ? event : candidate) : [...ledger.events, event] };
-  const result = replayLedger(next, undefined, today);
-  return result.issues.length ? { issues: result.issues } : { ledger: next, issues: [] };
+  try {
+    const result = replayLedger(next, undefined, today);
+    return result.issues.length ? { issues: result.issues } : { ledger: next, issues: [] };
+  } catch (error) { return { issues: [{ eventId: event.id, date: event.date, message: String(error) }] }; }
 }
 
 export function isNegativeAccountAdjustment(event: LedgerEvent): boolean {
@@ -336,9 +344,9 @@ export function migrateLegacyHoldings(holdings: Holding[], historyStartDate: str
   const events: LedgerEvent[] = [];
   let sequence = 1;
   for (const holding of holdings) {
-    const quantity = parseFixed(holding.quantity, QUANTITY_DIGITS);
+    const quantity = parseFixed(typeof holding?.quantity === 'number' && Number.isFinite(holding.quantity) ? holding.quantity.toFixed(QUANTITY_DIGITS) : holding?.quantity, QUANTITY_DIGITS);
     const symbol = holding.symbol?.trim().toUpperCase();
-    if (!holding.id || !symbol || quantity === undefined || quantity <= 0n || !['stock', 'crypto'].includes(holding.type)) continue;
+    if (!holding.id || !symbol || quantity === undefined || quantity <= 0n || !['stock', 'crypto'].includes(holding.type)) throw new Error('INTEGRITY_ERROR: Invalid legacy holding. Migration stopped.');
     assets.push({ id: holding.id, symbol, type: holding.type, createdAt: now });
     events.push({
       id: `legacy-${holding.id}`,
@@ -360,15 +368,34 @@ export function migrateLegacyHoldings(holdings: Holding[], historyStartDate: str
 export function emptyLedger(): PortfolioLedger { return structuredClone(EMPTY_LEDGER); }
 
 export function sanitizeLedger(value: unknown): PortfolioLedger | undefined {
-  if (!value || typeof value !== 'object') return undefined;
+  if (value == null) return undefined;
+  const invalid = () => { throw new Error('INTEGRITY_ERROR: Saved financial history is invalid. No records were discarded.'); };
+  if (typeof value !== 'object') return invalid();
   const candidate = value as { schemaVersion?: number; assets?: unknown[]; events?: unknown[] };
-  if (![1, 2].includes(candidate.schemaVersion ?? 0) || !Array.isArray(candidate.assets) || !Array.isArray(candidate.events)) return undefined;
-  const assets = candidate.assets.filter((asset): asset is LedgerAsset => Boolean(asset && typeof asset === 'object'));
-  const events = candidate.events.filter((event): event is LedgerEvent | LegacyOpeningPositionEvent => Boolean(event && typeof event === 'object')).flatMap((event) => {
+  if ((candidate.schemaVersion ?? 0) > 2) throw new Error('UNSUPPORTED_SCHEMA: Update Finance Widget to open this newer portfolio.');
+  if (![1, 2].includes(candidate.schemaVersion ?? 0) || !Array.isArray(candidate.assets) || !Array.isArray(candidate.events)) return invalid();
+  const nonempty = (v: unknown): v is string => typeof v === 'string' && v.trim().length > 0;
+  const assets = candidate.assets as LedgerAsset[];
+  for (const a of assets) if (!a || typeof a !== 'object' || !nonempty(a.id) || !nonempty(a.symbol) || !nonempty(a.createdAt) || !['stock','crypto'].includes(a.type)) return invalid();
+  for (const raw of candidate.events) {
+    if (!raw || typeof raw !== 'object') return invalid();
+    const e = raw as Record<string, unknown>;
+    if (!nonempty(e.id) || !nonempty(e.createdAt) || !nonempty(e.updatedAt) || !isIsoDate(e.date) || !Number.isSafeInteger(e.sequence) || Number(e.sequence) < 1) return invalid();
+    if (!['buy','sell','opening_position','cash_opening','cash_deposit','cash_withdrawal','cash_adjustment','debt_opening','debt_adjustment','debt_payment'].includes(String(e.eventType))) return invalid();
+    if (['buy','sell','opening_position'].includes(String(e.eventType))) {
+      if (!nonempty(e.assetId) || typeof e.quantity !== 'string') return invalid();
+      if (e.eventType !== 'opening_position') {
+        if (candidate.schemaVersion === 2 && typeof e.affectsCashDebt !== 'boolean') return invalid();
+        if (typeof e.fees !== 'string' || !['manual_unit','manual_total','historical_close','previous_trading_close','current_quote','stale_quote_confirmed','legacy_unknown'].includes(String(e.priceSource))) return invalid();
+        for (const field of ['unitPrice','totalAmount']) if (e[field] !== undefined && typeof e[field] !== 'string') return invalid();
+      } else if (candidate.schemaVersion !== 1 || typeof e.needsReconciliation !== 'boolean' || !['manual_total','legacy_unknown'].includes(String(e.priceSource)) || (e.totalAmount !== undefined && (typeof e.totalAmount !== 'string' || (parseFixed(e.totalAmount, MONEY_DIGITS) ?? 0n) <= 0n))) return invalid();
+    } else if (typeof e.amount !== 'string') return invalid();
+  }
+  const events = (candidate.events as (LedgerEvent | LegacyOpeningPositionEvent)[]).flatMap((event) => {
     if (event.eventType === 'opening_position') {
       const quantity = parseFixed(event.quantity, QUANTITY_DIGITS);
       const total = event.totalAmount === undefined ? undefined : parseFixed(event.totalAmount, MONEY_DIGITS);
-      if (quantity === undefined || quantity <= 0n) return [];
+      if (quantity === undefined || quantity <= 0n) return invalid();
       const knownBasis = total !== undefined && total > 0n;
       const unitPrice = knownBasis
         ? formatFixed(divideRounded(total * 10n ** BigInt(QUANTITY_DIGITS + PRICE_DIGITS - MONEY_DIGITS), quantity), PRICE_DIGITS)
@@ -394,5 +421,20 @@ export function sanitizeLedger(value: unknown): PortfolioLedger | undefined {
     }
     return [event as LedgerEvent];
   });
-  return { schemaVersion: 2, assets, events };
+  const ledger: PortfolioLedger = { schemaVersion: 2, assets, events };
+  if (replayLedger(ledger).issues.length) return invalid();
+  return ledger;
+}
+
+/** New targets follow all existing events on their date; edits keep their sequence. */
+export function datedBalanceDelta(ledger: PortfolioLedger, kind: 'cash' | 'debt', target: string, date: string, editing?: LedgerEvent): string | undefined {
+  const amount = parseFixed(target, MONEY_DIGITS);
+  if (amount === undefined || !isIsoDate(date)) return undefined;
+  const marker = { id: editing?.id ?? '__preview__', date, sequence: editing?.date === date ? editing.sequence : nextSequence(ledger.events, date), createdAt: editing?.createdAt ?? 'preview' } as LedgerEvent;
+  const prior = { ...ledger, events: ledger.events.filter(e => e.id !== editing?.id && compareLedgerEvents(e, marker) < 0) };
+  const replay = replayLedger(prior);
+  if (replay.issues.length) return undefined;
+  const base = parseFixed(replay.state[kind].toFixed(MONEY_DIGITS), MONEY_DIGITS);
+  if (base === undefined || amount === base) return undefined;
+  return formatFixed(amount - base, MONEY_DIGITS);
 }

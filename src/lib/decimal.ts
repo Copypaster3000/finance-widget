@@ -1,9 +1,19 @@
 export const QUANTITY_DIGITS = 8;
 export const PRICE_DIGITS = 6;
 export const MONEY_DIGITS = 2;
+export const MAX_MONEY = 1_000_000_000_000;
+export const MAX_QUANTITY = 1_000_000;
+export const MAX_PRICE = 1_000_000;
+export function fixedLimit(digits: number): bigint { return BigInt(digits === MONEY_DIGITS ? MAX_MONEY : MAX_QUANTITY) * 10n ** BigInt(digits); }
+export function safeNumber(value: number, limit = MAX_MONEY): number {
+  if (!Number.isFinite(value) || Math.abs(value) > limit) throw new Error('Value exceeds the supported numeric range.');
+  return value;
+}
 
 export function parseFixed(value: unknown, digits: number, allowNegative = false): bigint | undefined {
-  const text = typeof value === 'number' ? String(value) : typeof value === 'string' ? value.trim() : '';
+  const raw = typeof value === 'number' ? String(value) : typeof value === 'string' ? value.trim() : '';
+  const text = raw.replace(/^(-?)\./, (_match, sign: string) => `${sign}0.`);
+  if (text.length > 40) return undefined;
   const pattern = allowNegative ? /^-?\d+(?:\.\d+)?$/ : /^\d+(?:\.\d+)?$/;
   if (!pattern.test(text)) return undefined;
   const negative = text.startsWith('-');
@@ -12,6 +22,7 @@ export function parseFixed(value: unknown, digits: number, allowNegative = false
   if (fraction.length > digits) return undefined;
   const scale = 10n ** BigInt(digits);
   const result = BigInt(whole) * scale + BigInt((fraction + '0'.repeat(digits)).slice(0, digits) || '0');
+  if (result > fixedLimit(digits)) return undefined;
   return negative ? -result : result;
 }
 
@@ -25,7 +36,8 @@ export function formatFixed(value: bigint, digits: number): string {
 }
 
 export function fixedToNumber(value: bigint, digits: number): number {
-  return Number(value) / 10 ** digits;
+  if (value > fixedLimit(digits) || value < -fixedLimit(digits)) throw new Error('Value exceeds the supported numeric range.');
+  return safeNumber(Number(value) / 10 ** digits, digits === MONEY_DIGITS ? MAX_MONEY : MAX_QUANTITY);
 }
 
 export function divideRounded(numerator: bigint, denominator: bigint): bigint {

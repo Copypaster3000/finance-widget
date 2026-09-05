@@ -1,3 +1,5 @@
+import { MAX_MONEY, MAX_QUANTITY } from './decimal';
+
 const moneyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const compactMoneyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', notation: 'compact', maximumFractionDigits: 2 });
 
@@ -5,10 +7,11 @@ export function normalizedCurrencyValue(value: number): number {
   return Number.isFinite(value) && Math.abs(value) < 0.005 ? 0 : value;
 }
 
-export const money = { format: (value: number) => moneyFormatter.format(normalizedCurrencyValue(value)) };
-export const compactMoney = { format: (value: number) => compactMoneyFormatter.format(normalizedCurrencyValue(value)) };
+export const money = { format: (value: number) => Number.isFinite(value) && Math.abs(value) <= MAX_MONEY ? moneyFormatter.format(normalizedCurrencyValue(value)) : 'UNAVAILABLE' };
+export const compactMoney = { format: (value: number) => Number.isFinite(value) && Math.abs(value) <= MAX_MONEY ? compactMoneyFormatter.format(normalizedCurrencyValue(value)) : 'UNAVAILABLE' };
 
 export function formatQuantity(value: number, type: 'stock' | 'crypto'): string {
+  if (!Number.isFinite(value) || Math.abs(value) > MAX_QUANTITY) return 'UNAVAILABLE';
   return new Intl.NumberFormat('en-US', { maximumFractionDigits: type === 'crypto' ? 8 : 4 }).format(value);
 }
 
@@ -19,6 +22,7 @@ export function signedMoney(value: number): string {
 }
 
 export function signedPercent(value: number): string {
+  if (!Number.isFinite(value)) return 'UNAVAILABLE';
   const normalized = Math.abs(value) < 0.005 ? 0 : value;
   return `${normalized >= 0 ? '+' : '−'}${Math.abs(normalized).toFixed(2)}%`;
 }

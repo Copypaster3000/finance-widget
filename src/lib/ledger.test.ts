@@ -311,9 +311,7 @@ describe('legacy migration', () => {
     expect(state.positions[0]).toMatchObject({ quantity: 6, remainingCostBasis: undefined });
   });
 
-  it('handles malformed persisted event records without throwing', () => {
-    const malformed = sanitizeLedger({ schemaVersion: 1, assets: [asset], events: [{ id: 'broken' }] })!;
-    const result = replayLedger(malformed, undefined, '2026-08-29');
-    expect(result.issues[0].message).toContain('invalid date');
+  it('refuses malformed persisted records instead of returning a partial ledger', () => {
+    expect(() => sanitizeLedger({ schemaVersion: 1, assets: [asset], events: [{ id: 'broken' }] })).toThrow('INTEGRITY_ERROR');
   });
 });

@@ -64,7 +64,7 @@ Yahoo Finance currently supplies normalized regular, extended, overnight-when-av
 
 ## Build from source
 
-Requirements: Windows 11 x86-64, Node.js 20+, Rust stable with MSVC, Visual Studio C++ Build Tools, and WebView2.
+Requirements: Windows 11 x86-64, Node.js 20.19+ (20.x) or 22.12+, Rust stable with MSVC, Visual Studio C++ Build Tools, and WebView2.
 
 ```powershell
 npm install
@@ -83,6 +83,16 @@ $env:Path = "C:\Users\$env:USERNAME\.cargo\bin;$env:Path"
 ```
 
 The NSIS installer is written to `src-tauri/target/release/bundle/nsis`.
+
+After a successful native build, `npm run release:stage` copies only the installer matching the current package/Tauri version into `src-tauri/target/release-candidate/<version>/` and generates a fresh `SHA256SUMS.txt`. This does not publish a GitHub release. See [release candidate verification](docs/release-candidate-verification.md) for the manual release gates.
+
+## Supported financial inputs
+
+Enter plain decimal text (scientific notation is not accepted). Quantities support 8 decimal places and at most 1,000,000 units per position; unit prices support 6 decimal places and at most 1,000,000 USD. Money supports cents and a magnitude of at most 1 trillion USD, including account balances and aggregate valuation. Values outside supported ranges must be corrected before saving or valuing the portfolio.
+
+Set Balance sets Cash or Debt to the requested target on the selected date. A new entry follows existing activity on that date; an edit keeps its same-day position unless its date changes. Later events replay normally. Re-edit earlier targets if subsequent edits to earlier activity change their meaning: the saved record is a dated adjustment, not a permanently enforced balance rule.
+
+Automatic trade prices use a shared 15-minute freshness threshold. Older stock closes while the market is closed and stale cached quotes require confirmation, preserving the actual price date. Market timestamps that are unknown, implausibly future-dated, or associated with a non-USD quote are not used for automatic trade pricing.
 
 ## Architecture
 

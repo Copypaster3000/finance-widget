@@ -2,6 +2,7 @@
   import Icon from './Icon.svelte';
   import { version } from '../../package.json';
   import { localCalendarDate } from '../lib/calendar';
+  import { isIsoDate } from '../lib/history';
   import type { AppConfig, RefreshMode } from '../lib/types';
   export let config: AppConfig;
   export let autoHistoryStartDate: string;
@@ -32,6 +33,7 @@
   function adjustTextScale(delta: number) { draft.appearance.scale = Math.round(Math.min(1.4, Math.max(0.8, draft.appearance.scale + delta)) * 10) / 10; }
   async function apply() {
     if (saving) return;
+    if (!isIsoDate(draft.historyStartDate) || draft.historyStartDate > localCalendarDate()) { saveError = 'Enter a valid history start date that is not in the future.'; return; }
     saving = true; saveError = '';
     try { await onApply({ ...draft, schemaVersion: 10, historyStartDate: draft.historyStartDate || autoHistoryStartDate }); }
     catch (error) { saveError = `Save failed: ${String(error)}`; }

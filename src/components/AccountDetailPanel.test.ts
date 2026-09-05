@@ -15,7 +15,7 @@ function props(overrides: Record<string, unknown> = {}) {
   return {
     kind: 'debt' as const,
     balance: 1000,
-    events: [] as LedgerEvent[],
+    events: [{ id: 'synthetic-opening', eventType: 'debt_opening', amount: '1000', date: '2020-01-01', sequence: 1, createdAt, updatedAt: createdAt }] as LedgerEvent[],
     activities: [] as AccountActivity[],
     assets: [asset],
     onBack: vi.fn(),
@@ -29,6 +29,14 @@ function props(overrides: Record<string, unknown> = {}) {
 }
 
 describe('account ledger controls', () => {
+  it.each(['cash','debt'] as const)('saves an ordinary one-cent %s target from text inputs',async kind=>{
+    const event={id:'opening',date:'2020-01-01',sequence:1,eventType:`${kind}_opening`,amount:'12.34',createdAt,updatedAt:createdAt};
+    const input=props({kind,balance:12.34,events:[event]});render(AccountDetailPanel,{props:input});
+    await fireEvent.click(screen.getByRole('button',{name:'SET BALANCE'}));
+    await fireEvent.input(screen.getByLabelText('TARGET BALANCE'),{target:{value:'12.35'}});
+    await fireEvent.click(screen.getByRole('button',{name:`SET ${kind.toUpperCase()} BALANCE`}));
+    await waitFor(()=>expect(input.onSave).toHaveBeenCalledOnce());expect(input.onSave.mock.calls[0][0].amount).toBe('0.01');
+  });
   it('records a Debt payment with an explicit Cash source', async () => {
     const input = props();
     render(AccountDetailPanel, { props: input });

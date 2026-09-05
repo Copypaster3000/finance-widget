@@ -1,3 +1,4 @@
+use crate::validation::{validate, Invalid};
 use serde_json::{Map, Value};
 use std::{
     fs::{self, OpenOptions},
@@ -16,6 +17,23 @@ pub struct Session {
     path: PathBuf,
     data: Data,
     disk: Option<Vec<u8>>,
+    metadata: LoadMetadata,
+}
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadMetadata {
+    state: &'static str,
+    recovery_reason: Option<String>,
+    backup_modified_at: Option<u64>,
+}
+#[derive(serde::Serialize)]
+pub struct LoadResult {
+    data: Data,
+    metadata: LoadMetadata,
+}
+fn describe(error: Invalid) -> String {
+    match error { Invalid::Future => "UNSUPPORTED_SCHEMA: This portfolio was created by a newer version of Finance Widget. Update the app to open it safely.".into(), Invalid::Corrupt(message) => format!("INTEGRITY_ERROR: {message}") }
 }
 
 fn read(path: &Path) -> Result<Option<Vec<u8>>, String> {
@@ -26,18 +44,10 @@ fn read(path: &Path) -> Result<Option<Vec<u8>>, String> {
     }
 }
 
-fn decode(bytes: &[u8]) -> Result<Data, String> {
+fn decode(bytes: &[u8]) -> Result<Data, Invalid> {
     let data: Data = serde_json::from_slice(bytes)
-        .map_err(|_| "Saved portfolio is not valid JSON".to_string())?;
-    if let Some(ledger) = data.get("portfolio-ledger-v1") {
-        let schema = ledger.get("schemaVersion").and_then(Value::as_u64);
-        if !matches!(schema, Some(1 | 2))
-            || !ledger.get("assets").is_some_and(Value::is_array)
-            || !ledger.get("events").is_some_and(Value::is_array)
-        {
-            return Err("Saved portfolio ledger cannot be read safely".into());
-        }
-    }
+        .map_err(|_| Invalid::Corrupt("Saved portfolio is not valid JSON".into()))?;
+    validate(&data)?;
     Ok(data)
 }
 
@@ -73,20 +83,49 @@ impl Session {
     fn open(path: PathBuf) -> Result<Self, String> {
         let disk = read(&path)?;
         let backup = backup_path(&path);
+        let mut metadata = LoadMetadata {
+            state: "portfolioLoaded",
+            recovery_reason: None,
+            backup_modified_at: None,
+        };
         let data = match disk.as_deref() {
             Some(bytes) => match decode(bytes) {
                 Ok(data) => data,
+                Err(Invalid::Future) => return Err(describe(Invalid::Future)),
                 Err(error) => match read(&backup)?.as_deref() {
-                    Some(bytes) => decode(bytes).map_err(|_| error)?,
-                    None => return Err(error),
+                    Some(bytes) => {
+                        metadata.state = "portfolioRecovered";
+                        metadata.recovery_reason = Some(describe(error));
+                        decode(bytes).map_err(describe)?
+                    }
+                    None => return Err(describe(error)),
                 },
             },
             None => match read(&backup)?.as_deref() {
-                Some(bytes) => decode(bytes)?,
-                None => Data::new(),
+                Some(bytes) => {
+                    metadata.state = "portfolioRecovered";
+                    metadata.recovery_reason = Some("Primary saved copy is missing".into());
+                    decode(bytes).map_err(describe)?
+                }
+                None => {
+                    metadata.state = "firstRunEmpty";
+                    Data::new()
+                }
             },
         };
-        Ok(Self { path, data, disk })
+        if metadata.state == "portfolioRecovered" {
+            metadata.backup_modified_at = fs::metadata(&backup)
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|t| t.as_millis() as u64);
+        }
+        Ok(Self {
+            path,
+            data,
+            disk,
+            metadata,
+        })
     }
 
     fn save(&mut self, updates: Data) -> Result<(), String> {
@@ -110,7 +149,12 @@ impl Session {
         next.extend(updates);
         let bytes =
             serde_json::to_vec_pretty(&next).map_err(|_| "Cannot encode portfolio".to_string())?;
-        decode(&bytes)?;
+        decode(&bytes).map_err(describe)?;
+        if let Some(backup) = read(&backup_path(&self.path))? {
+            if matches!(decode(&backup), Err(Invalid::Future)) {
+                return Err(describe(Invalid::Future));
+            }
+        }
         if let Some(previous) = &self.disk {
             if decode(previous).is_ok() {
                 atomic_write(&backup_path(&self.path), previous)?;
@@ -127,7 +171,9 @@ impl Session {
 pub fn load_portfolio(
     app: tauri::AppHandle,
     state: tauri::State<'_, Persistence>,
-) -> Result<Data, String> {
+) -> Result<LoadResult, String> {
+    let mut active = state.0.lock().map_err(|_| "Portfolio lock unavailable")?;
+    *active = None;
     let path = app
         .path()
         .app_data_dir()
@@ -135,8 +181,9 @@ pub fn load_portfolio(
         .join("portfolio.json");
     let session = Session::open(path)?;
     let data = session.data.clone();
-    *state.0.lock().map_err(|_| "Portfolio lock unavailable")? = Some(session);
-    Ok(data)
+    let metadata = session.metadata.clone();
+    *active = Some(session);
+    Ok(LoadResult { data, metadata })
 }
 
 #[tauri::command]
@@ -166,7 +213,180 @@ mod tests {
         dir.join("portfolio.json")
     }
     fn fixture() -> Data {
-        serde_json::from_value(json!({"portfolio-ledger-v1":{"schemaVersion":2,"assets":[{"id":"synthetic","symbol":"TEST","type":"stock"}],"events":[]}})).unwrap()
+        serde_json::from_value(json!({"portfolio-ledger-v1":{"schemaVersion":2,"assets":[{"id":"synthetic","symbol":"TEST","type":"stock","createdAt":"2020-01-01T00:00:00Z"}],"events":[]}})).unwrap()
+    }
+    fn trade() -> Value {
+        json!({"id":"trade","eventType":"buy","assetId":"synthetic","date":"2020-01-02","sequence":1,"quantity":"2","unitPrice":"5","fees":"0","totalAmount":"10","priceSource":"manual_unit","affectsCashDebt":false,"createdAt":"2020-01-02T00:00:00Z","updatedAt":"2020-01-02T00:00:00Z"})
+    }
+    fn populated() -> Data {
+        let mut d = fixture();
+        d.get_mut("portfolio-ledger-v1").unwrap()["events"] = json!([trade()]);
+        d
+    }
+    fn failed_load_preserves(primary: &[u8], backup: Option<&[u8]>, future: bool) {
+        let path = path();
+        fs::write(&path, primary).unwrap();
+        if let Some(b) = backup {
+            fs::write(backup_path(&path), b).unwrap();
+        }
+        let error = Session::open(path.clone())
+            .err()
+            .expect("Must refuse authoritative load");
+        assert_eq!(error.contains("UNSUPPORTED_SCHEMA"), future);
+        assert_eq!(fs::read(&path).unwrap(), primary);
+        assert_eq!(read(&backup_path(&path)).unwrap().as_deref(), backup);
+        fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+    #[test]
+    fn incomplete_primary_recovers_without_destroying_backup() {
+        for primary in [
+            b"{}".as_slice(),
+            b"",
+            b"{broken",
+            b"{\"configuration\":{\"schemaVersion\":10}}",
+        ] {
+            let path = path();
+            let good = serde_json::to_vec(&populated()).unwrap();
+            fs::write(&path, primary).unwrap();
+            fs::write(backup_path(&path), &good).unwrap();
+            let mut recovered = Session::open(path.clone()).unwrap();
+            assert_eq!(recovered.metadata.state, "portfolioRecovered");
+            assert!(recovered.metadata.recovery_reason.is_some());
+            assert_eq!(recovered.data, populated());
+            recovered.save(Data::new()).unwrap();
+            assert_eq!(fs::read(backup_path(&path)).unwrap(), good);
+            assert_eq!(decode(&fs::read(&path).unwrap()).unwrap(), populated());
+            fs::remove_dir_all(path.parent().unwrap()).unwrap();
+        }
+    }
+    #[test]
+    fn incomplete_primary_without_recovery_is_not_first_run() {
+        for primary in [b"{}".as_slice(), b"", b"{broken"] {
+            failed_load_preserves(primary, None, false);
+        }
+    }
+    #[test]
+    fn future_primary_never_downgrades_to_backup() {
+        for key in ["portfolio-ledger-v1", "configuration"] {
+            let mut d = populated();
+            d.insert(key.into(), json!({"schemaVersion":99}));
+            let good = serde_json::to_vec(&populated()).unwrap();
+            failed_load_preserves(&serde_json::to_vec(&d).unwrap(), Some(&good), true);
+        }
+    }
+    #[test]
+    fn valid_primary_ignores_bad_backup_and_rotates_only_verified_data() {
+        let path = path();
+        let good = serde_json::to_vec(&populated()).unwrap();
+        fs::write(&path, &good).unwrap();
+        fs::write(backup_path(&path), b"{}").unwrap();
+        let mut session = Session::open(path.clone()).unwrap();
+        assert_eq!(session.metadata.state, "portfolioLoaded");
+        session.save(Data::new()).unwrap();
+        assert_eq!(fs::read(backup_path(&path)).unwrap(), good);
+        fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+    #[test]
+    fn both_copies_corrupt_preserves_both() {
+        failed_load_preserves(b"{broken", Some(b"{}"), false);
+    }
+    #[test]
+    fn malformed_financial_records_block_load_and_save() {
+        let mut variants = vec![Value::Null, json!(42), json!({})];
+        for (key, value) in [
+            ("date", json!("2020-02-31")),
+            ("quantity", json!(1)),
+            ("quantity", json!("1000001")),
+            ("eventType", json!("mystery")),
+            ("assetId", json!("missing")),
+            ("sequence", json!(0)),
+            ("affectsCashDebt", json!("false")),
+            ("totalAmount", json!("NaN")),
+        ] {
+            let mut t = trade();
+            t[key] = value;
+            variants.push(t);
+        }
+        let mut sale = trade();
+        sale["eventType"] = json!("sell");
+        variants.push(sale);
+        for value in variants {
+            let mut d = populated();
+            d.get_mut("portfolio-ledger-v1").unwrap()["events"] = json!([value]);
+            let bytes = serde_json::to_vec(&d).unwrap();
+            failed_load_preserves(&bytes, None, false);
+            let path = path();
+            let mut session = Session::open(path.clone()).unwrap();
+            session.save(populated()).unwrap();
+            let before = fs::read(&path).unwrap();
+            let backup = read(&backup_path(&path)).unwrap();
+            assert!(session.save(d).is_err());
+            assert_eq!(fs::read(&path).unwrap(), before);
+            assert_eq!(read(&backup_path(&path)).unwrap(), backup);
+            fs::remove_dir_all(path.parent().unwrap()).unwrap();
+        }
+    }
+    #[test]
+    fn duplicate_ids_negative_debt_and_bad_assets_fail() {
+        for events in [
+            json!([trade(), trade()]),
+            json!([{"id":"adjust","date":"2020-01-02","sequence":1,"createdAt":"test","updatedAt":"test","eventType":"debt_adjustment","amount":"-1"}]),
+        ] {
+            let mut d = fixture();
+            d.get_mut("portfolio-ledger-v1").unwrap()["events"] = events;
+            failed_load_preserves(&serde_json::to_vec(&d).unwrap(), None, false);
+        }
+        let mut d = fixture();
+        d.get_mut("portfolio-ledger-v1").unwrap()["assets"] = json!([null]);
+        failed_load_preserves(&serde_json::to_vec(&d).unwrap(), None, false);
+    }
+    #[test]
+    fn malformed_configuration_is_authoritative_but_caches_are_rebuildable() {
+        let mut d = populated();
+        d.insert("configuration".into(), json!({"schemaVersion":"10"}));
+        failed_load_preserves(&serde_json::to_vec(&d).unwrap(), None, false);
+        d.remove("configuration");
+        d.insert("quote-cache".into(), json!(42));
+        d.insert(
+            "ledger-price-history-v1".into(),
+            json!({"entries":{"bad":{"symbol":42}}}),
+        );
+        let path = path();
+        fs::write(&path, serde_json::to_vec(&d).unwrap()).unwrap();
+        let mut s = Session::open(path.clone()).unwrap();
+        assert_eq!(s.metadata.state, "portfolioLoaded");
+        s.save(Data::new()).unwrap();
+        assert_eq!(decode(&fs::read(&path).unwrap()).unwrap(), d);
+        fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+    #[cfg(windows)]
+    #[test]
+    fn locked_primary_or_backup_preserves_files() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let path = path();
+        let mut s = Session::open(path.clone()).unwrap();
+        s.save(populated()).unwrap();
+        s.save(Data::new()).unwrap();
+        let before = fs::read(&path).unwrap();
+        let backup = fs::read(backup_path(&path)).unwrap();
+        let held = OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&path)
+            .unwrap();
+        assert!(Session::open(path.clone()).is_err());
+        assert!(s.save(Data::new()).is_err());
+        drop(held);
+        let held = OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(backup_path(&path))
+            .unwrap();
+        assert!(s.save(Data::new()).is_err());
+        drop(held);
+        assert_eq!(fs::read(&path).unwrap(), before);
+        assert_eq!(fs::read(backup_path(&path)).unwrap(), backup);
+        fs::remove_dir_all(path.parent().unwrap()).unwrap();
     }
     #[test]
     fn saved_data_survives_reopening_and_keeps_other_keys() {

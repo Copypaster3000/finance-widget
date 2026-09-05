@@ -22,6 +22,14 @@ function props(overrides: Record<string, unknown> = {}) {
 afterEach(cleanup);
 
 describe('per-trade Cash and Debt control', () => {
+  it('saves eight-decimal quantities without numeric binding conversion',async()=>{
+    const input=props();render(AssetDetailPanel,{props:input});
+    await fireEvent.click(screen.getByRole('button',{name:'+ BUY'}));
+    await fireEvent.input(screen.getByLabelText('QUANTITY'),{target:{value:'0.00000001'}});
+    await fireEvent.input(screen.getByLabelText('PRICE / UNIT'),{target:{value:'1000000'}});
+    await fireEvent.click(screen.getByRole('button',{name:'ADD BUY'}));
+    await waitFor(()=>expect(input.onSave).toHaveBeenCalledOnce());expect(input.onSave.mock.calls[0][0].quantity).toBe('0.00000001');
+  });
   it('saves a new Buy with its independent account-impact choice disabled', async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(AssetDetailPanel, { props: props({ onSave }) });

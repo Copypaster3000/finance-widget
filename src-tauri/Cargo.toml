@@ -1,6 +1,6 @@
 [package]
 name = "finance-widget"
-version = "0.1.2"
+version = "0.1.3"
 description = "Windows finance and portfolio widget"
 authors = ["Copypaster3000"]
 edition = "2021"
@@ -15,6 +15,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+chrono = "0.4"
 reqwest = { version = "0.12", features = ["cookies"] }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-autostart = "2"

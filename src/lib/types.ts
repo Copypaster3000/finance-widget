@@ -6,7 +6,7 @@ export type StockSession = 'regular' | 'extended';
 export type HistoryRange = '1h' | '1d' | '1w' | '1m' | 'all';
 export type HistoryStartMode = 'auto' | 'manual';
 export type ProviderKind = 'mock' | 'yahoo';
-export type PriceSource = 'manual_unit' | 'manual_total' | 'historical_close' | 'previous_trading_close' | 'current_quote' | 'legacy_unknown';
+export type PriceSource = 'manual_unit' | 'manual_total' | 'historical_close' | 'previous_trading_close' | 'current_quote' | 'stale_quote_confirmed' | 'legacy_unknown';
 
 export interface Holding {
   id: string;
@@ -28,6 +28,8 @@ interface LedgerEventBase {
   sequence: number;
   createdAt: string;
   updatedAt: string;
+  priceDate?: string;
+  marketTimestamp?: number;
 }
 
 export interface BuyEvent extends LedgerEventBase {
@@ -169,9 +171,10 @@ export interface LedgerMutationError {
 
 export interface TransactionPriceResolution {
   unitPrice: string;
-  source: Extract<PriceSource, 'historical_close' | 'previous_trading_close' | 'current_quote'>;
+  source: Extract<PriceSource, 'historical_close' | 'previous_trading_close' | 'current_quote' | 'stale_quote_confirmed'>;
   priceDate: string;
   requiresConfirmation: boolean;
+  marketTimestamp?: number;
 }
 
 export interface Quote {
@@ -183,6 +186,8 @@ export interface Quote {
   change?: number;
   changePercent?: number;
   timestamp: number;
+  receivedAt?: number;
+  session?: StockSession;
   provider: string;
   status: 'live' | 'delayed' | 'cached' | 'mock';
 }

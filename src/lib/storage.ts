@@ -5,6 +5,11 @@ import { EMPTY_HOURLY_CACHE, sanitizeHourlyCache } from './hourly';
 import { normalizeAppearanceScale, normalizeHistoryRange, normalizeRefreshMode, normalizeStockSession } from './config';
 import { migrateLegacyHoldings, sanitizeLedger } from './ledger';
 import { EMPTY_LEDGER_PRICE_CACHE, sanitizeLedgerPriceCache } from './ledgerHistory';
+import { sanitizeQuotes } from './quotePolicy';
+import { isIsoDate } from './history';
+
+export interface LoadMetadata { state: 'firstRunEmpty' | 'portfolioLoaded' | 'portfolioRecovered'; recoveryReason?: string; backupModifiedAt?: number }
+interface NativeLoad { data: Record<string, unknown>; metadata: LoadMetadata }
 
 const CONFIG_KEY = 'configuration';
 const QUOTES_KEY = 'quote-cache';
@@ -23,6 +28,9 @@ export class StorageUnavailableError extends Error {
 }
 
 function mergeConfig(value: Partial<AppConfig> | null | undefined): AppConfig {
+  if (value != null && (typeof value !== 'object' || !Number.isInteger(value.schemaVersion) || Number(value.schemaVersion) < 1)) throw new StorageUnavailableError('INTEGRITY_ERROR: Invalid configuration schema.');
+  if (value && Number(value.schemaVersion) > 10) throw new StorageUnavailableError('UNSUPPORTED_SCHEMA: Update Finance Widget to open this configuration.');
+  if (value?.historyStartDate !== undefined && !isIsoDate(value.historyStartDate)) throw new StorageUnavailableError('INTEGRITY_ERROR: Invalid history start date.');
   const current = { ...value } as Partial<AppConfig> & Record<string, unknown>;
   delete current.provider;
   delete current.twelveDataApiKey;
@@ -53,12 +61,12 @@ function wait(delay: number): Promise<void> {
   return delay > 0 ? new Promise((resolve) => setTimeout(resolve, delay)) : Promise.resolve();
 }
 
-async function loadNativeData(): Promise<Record<string, unknown>> {
+async function loadNativeData(): Promise<NativeLoad> {
   let failure = 'LOCAL DATA STORE UNAVAILABLE';
   for (const delay of RETRY_DELAYS) {
     await wait(delay);
     try {
-      return await invoke<Record<string, unknown>>('load_portfolio');
+      return await invoke<NativeLoad>('load_portfolio');
     } catch (error) {
       failure = String(error);
     }
@@ -101,8 +109,8 @@ function readStoredState(values: {
   const ledger = storedLedger ?? migrateLegacyHoldings(Array.isArray(values.rawConfig?.holdings) ? values.rawConfig.holdings : [], config.historyStartDate);
   return {
     config,
-    quotes: values.quotes ?? [],
-    historyCache: values.historyCache ?? {},
+    quotes: sanitizeQuotes(values.quotes),
+    historyCache: values.historyCache && typeof values.historyCache === 'object' && !Array.isArray(values.historyCache) ? values.historyCache : {},
     hourlyHistory: sanitizeHourlyCache(values.hourlyHistory),
     ledger,
     ledgerPriceCache: sanitizeLedgerPriceCache(values.ledgerPriceCache),
@@ -111,17 +119,18 @@ function readStoredState(values: {
   };
 }
 
-export async function loadState(): Promise<{ config: AppConfig; quotes: Quote[]; historyCache: HistoricalCache; hourlyHistory: PortfolioHourlyCache; ledger: PortfolioLedger; ledgerPriceCache: LedgerPriceCache; ledgerMigrated: boolean; configMigrated: boolean }> {
+export async function loadState() {
   if (hasNativeBridge()) {
-    const data = await loadNativeData();
-    return readStoredState({
+    const { data, metadata } = await loadNativeData();
+    if (metadata.state !== 'firstRunEmpty' && data[LEDGER_KEY] == null && !Array.isArray((data[CONFIG_KEY] as {holdings?:unknown})?.holdings)) throw new StorageUnavailableError('INTEGRITY_ERROR: Saved ledger is missing.');
+    return { ...readStoredState({
       rawConfig: data[CONFIG_KEY] as Partial<AppConfig> & { holdings?: Holding[] },
       quotes: data[QUOTES_KEY] as Quote[], historyCache: data[HISTORY_KEY] as HistoricalCache,
       hourlyHistory: data[HOURLY_HISTORY_KEY] as PortfolioHourlyCache,
       rawLedger: data[LEDGER_KEY] as PortfolioLedger, ledgerPriceCache: data[LEDGER_PRICE_HISTORY_KEY] as LedgerPriceCache
-    });
+    }), metadata };
   }
-  return loadBrowserState();
+  return { ...loadBrowserState(), metadata: { state: localStorage.getItem(LEDGER_KEY) ? 'portfolioLoaded' : 'firstRunEmpty' } as LoadMetadata };
 }
 
 export async function saveLedgerPriceCache(cache: LedgerPriceCache): Promise<void> {

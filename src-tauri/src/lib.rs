@@ -1,5 +1,6 @@
 use std::sync::Mutex;
 mod persistence;
+mod validation;
 use tauri::Manager;
 use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_window_state::{StateFlags, WindowExt};
@@ -71,6 +72,8 @@ async fn fetch_yahoo_session_quotes(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let yahoo_client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(8))
+        .timeout(std::time::Duration::from_secs(15))
         .cookie_store(true)
         .user_agent("Mozilla/5.0 Finance Widget")
         .build()

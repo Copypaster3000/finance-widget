@@ -1,5 +1,6 @@
-import { isQuoteStale } from './portfolio';
-import type { FeedState, FeedStatus, HistoryWarning, Holding, PriceSourceTransition, Quote } from './types';
+import { calculateLedgerPortfolio, isQuoteStale } from './portfolio';
+import { sanitizeQuotes } from './quotePolicy';
+import type { FeedState, FeedStatus, HistoryWarning, Holding, LedgerAccountState, PriceSourceTransition, Quote } from './types';
 
 const MATERIAL_DELTA = 0.02;
 
@@ -18,25 +19,26 @@ export function providerLabel(provider?: string): string {
 export function preferredStoredQuotes(quotes: Quote[], holdings: Holding[], now = Date.now(), allowDemo = false): Quote[] {
   const active = new Set(holdings.map(key));
   const selected = new Map<string, Quote>();
-  for (const quote of quotes) {
+  for (const quote of sanitizeQuotes(quotes, now)) {
     if (!active.has(key(quote)) || !Number.isFinite(quote.price) || quote.price <= 0 || !Number.isFinite(quote.timestamp)) continue;
     if (quote.status === 'mock' && !allowDemo) continue;
     const normalized = quote.status !== 'mock' && isQuoteStale(quote, now) ? { ...quote, status: 'cached' as const } : quote;
     const existing = selected.get(key(quote));
-    if (!existing || normalized.timestamp > existing.timestamp || (existing.status === 'mock' && normalized.status !== 'mock')) selected.set(key(quote), normalized);
+    if (!existing || (existing.status === 'mock' && normalized.status !== 'mock') || ((existing.status === 'mock') === (normalized.status === 'mock') && normalized.timestamp > existing.timestamp)) selected.set(key(quote), normalized);
   }
   return [...selected.values()];
 }
 
 export function missingQuoteCount(quotes: Quote[], holdings: Holding[]): number {
-  const available = new Set(quotes.filter((quote) => quote.status !== 'mock').map(key));
+  const available = new Set(sanitizeQuotes(quotes).filter((quote) => quote.status !== 'mock').map(key));
   return holdings.filter((holding) => !available.has(key(holding))).length;
 }
 
-export function mergeIncomingQuotes(previous: Quote[], incoming: Quote[], holdings: Holding[]): Quote[] {
-  const active = new Set(holdings.map(key));
-  const received = new Set(incoming.map(key));
-  return [...incoming, ...previous.filter((quote) => quote.status !== 'mock' && active.has(key(quote)) && !received.has(key(quote)))];
+export function mergeIncomingQuotes(previous: Quote[], incoming: Quote[], holdings: Holding[], now = Date.now()): Quote[] {
+  const validIncoming = sanitizeQuotes(incoming, now);
+  // Switching regular/extended sessions intentionally selects a different market context.
+  const retained = sanitizeQuotes(previous, now).filter(old => !validIncoming.some(next => key(next) === key(old) && next.session && old.session && next.session !== old.session));
+  return preferredStoredQuotes([...validIncoming, ...retained], holdings, now);
 }
 
 export function resolveFeedState(input: { holdingCount: number; hasStocks: boolean; hasCrypto: boolean; stockSessionActive: boolean; errorCount: number; receivedCount: number; availableCount: number; hasLive: boolean }): FeedState {
@@ -66,6 +68,10 @@ export function detectPriceSourceTransition(beforeValue: number, afterValue: num
   const provenanceChanged = from !== to || beforeQuotes.some((quote) => quote.status === 'cached' || quote.status === 'mock');
   if (!provenanceChanged || Math.abs(deltaPercent) <= threshold) return undefined;
   return { from, to, delta, deltaPercent: deltaPercent * 100, detectedAt: now };
+}
+
+export function detectLedgerPriceSourceTransition(snapshot: LedgerAccountState, before: Quote[], after: Quote[], now = Date.now()) {
+  return detectPriceSourceTransition(calculateLedgerPortfolio(snapshot, before).totalValue, calculateLedgerPortfolio(snapshot, after).totalValue, before, after, now);
 }
 
 export function feedLabel(feed: FeedStatus): string {

@@ -61,7 +61,7 @@
     return localCalendarDate();
   }
   function resetForm() { editing = undefined; date = today(); quantity = ''; mode = 'unit'; unitPrice = ''; totalAmount = ''; fees = '0'; affectsCashDebt = true; error = ''; pendingPrice = undefined; deleteTarget = undefined; deleteError = undefined; saveError = undefined; blockedDraft = undefined; }
-  function clearSaveFailure() { saveError = undefined; blockedDraft = undefined; }
+  function clearSaveFailure() { saveError = undefined; blockedDraft = undefined; error = ''; pendingPrice = undefined; }
   function startTrade(side: 'buy' | 'sell', event?: BuyEvent | SellEvent) {
     resetForm(); screen = side;
     if (event) {
@@ -99,10 +99,11 @@
       totalAmount,
       fees: useResolved ? '0' : fees,
       affectsCashDebt,
-      priceSource: resolution?.source ?? (editing && 'priceSource' in editing ? editing.priceSource : undefined),
+      priceSource: resolution?.source,
       createdAt: editing?.createdAt
     }, today());
     if (!result.event) { error = result.error ?? 'INVALID TRANSACTION'; return; }
+    if (resolution) { result.event.priceDate = resolution.priceDate; result.event.marketTimestamp = resolution.marketTimestamp; }
     working = true;
     const failure = await onSave(result.event); saveError = failure; blockedDraft = failure ? result.event : undefined; error = '';
     working = false;
@@ -185,13 +186,13 @@
   {:else if screen === 'buy' || screen === 'sell'}
     <section class="detail-card entry-card" on:input={clearSaveFailure} on:change={clearSaveFailure}>
       <div class="detail-code">{editing ? 'EDIT' : 'ADD'} {screen.toUpperCase()}</div>
-      <div class="form-grid"><label>DATE<input type="date" max={today()} bind:value={date}/></label><label>QUANTITY<input type="number" min="0" step="any" bind:value={quantity}/></label></div>
+      <div class="form-grid"><label>DATE<input type="date" max={today()} bind:value={date}/></label><label>QUANTITY<input type="text" inputmode="decimal" bind:value={quantity}/></label></div>
       <span class="setting-label">{screen === 'buy' ? 'COST INPUT' : 'VALUE INPUT'}</span>
       <div class="segmented"><button aria-pressed={mode === 'unit'} class:active={mode === 'unit'} on:click={() => mode = 'unit'}>PRICE / UNIT</button><button aria-pressed={mode === 'total'} class:active={mode === 'total'} on:click={() => mode = 'total'}>{screen === 'buy' ? 'TOTAL PAID' : 'TOTAL PROCEEDS'}</button></div>
       {#if mode === 'unit'}
-        <div class="form-grid"><label>PRICE / UNIT<input type="number" min="0" step="any" placeholder="AUTO IF BLANK" bind:value={unitPrice}/></label><label>FEES<input type="number" min="0" step="0.01" bind:value={fees}/></label></div>
+        <div class="form-grid"><label>PRICE / UNIT<input type="text" inputmode="decimal" placeholder="AUTO IF BLANK" bind:value={unitPrice}/></label><label>FEES<input type="text" inputmode="decimal" bind:value={fees}/></label></div>
       {:else}
-        <label>{screen === 'buy' ? 'TOTAL PAID / FEES INCLUDED' : 'NET PROCEEDS / AFTER FEES'}<input type="number" min="0" step="0.01" placeholder="AUTO IF BLANK" bind:value={totalAmount}/></label>
+        <label>{screen === 'buy' ? 'TOTAL PAID / FEES INCLUDED' : 'NET PROCEEDS / AFTER FEES'}<input type="text" inputmode="decimal" placeholder="AUTO IF BLANK" bind:value={totalAmount}/></label>
         {#if effectiveUnitPrice(totalAmount, quantity)}<p class="form-hint">EFFECTIVE UNIT {money.format(Number(effectiveUnitPrice(totalAmount, quantity)))}</p>{/if}
       {/if}
       <label class="account-impact-toggle"><input type="checkbox" bind:checked={affectsCashDebt}/><span class="account-impact-check" aria-hidden="true">{#if affectsCashDebt}<Icon name="check" size={10}/>{/if}</span><span class="account-impact-copy"><b>{screen === 'buy' ? 'USE TRACKED CASH / DEBT' : 'APPLY PROCEEDS TO CASH / DEBT'}</b><i>{affectsCashDebt ? (screen === 'buy' ? 'Cash first, then Margin Debt.' : 'Debt first, then remaining Cash.') : 'This transaction changes holdings and gains only.'}</i></span></label>
@@ -204,8 +205,8 @@
         {#if screen === 'sell' && consequence.cashDelta > 0}<p><i>TO CASH</i><b>+{money.format(consequence.cashDelta)}</b></p>{/if}
       </div>{/if}
       {#if screen === 'buy' && consequence?.debtDelta && consequence.debtDelta > 0 && !debtRowVisible}<p class="form-hint hidden-account-note">MARGIN DEBT WILL BE INCLUDED IN NET VALUE. ITS PORTFOLIO ROW IS HIDDEN IN SETTINGS.</p>{/if}
-      {#if previewResult && !previewResult.preview}<p class="form-hint">PREVIEW UNAVAILABLE / {previewResult.issues[0]?.message ?? 'INVALID DRAFT'}</p>{/if}
-      {#if pendingPrice}<div class="price-confirm"><span>MARKET CLOSED ON {date}</span><strong>{pendingPrice.priceDate} / {money.format(Number(pendingPrice.unitPrice))}</strong><div><button on:click={() => void finishTrade(pendingPrice)}>USE CLOSE</button><button on:click={() => { pendingPrice = undefined; mode = 'unit'; unitPrice = ''; }}>ENTER PRICE</button></div></div>{/if}
+      {#if previewResult && !previewResult.preview}<p class="form-hint">{editing && !affectsCashDebt ? 'CASH / DEBT REVIEW REQUIRED — Save will review later conflicting account adjustments.' : `PREVIEW UNAVAILABLE / ${previewResult.issues[0]?.message ?? 'INVALID DRAFT'}`}</p>{/if}
+      {#if pendingPrice}<div class="price-confirm"><span>{pendingPrice.source === 'stale_quote_confirmed' ? 'STALE PRICE / CONFIRM BEFORE SAVING' : 'PREVIOUS CLOSE / CONFIRM PRICE'}</span><strong>{pendingPrice.priceDate} / {money.format(Number(pendingPrice.unitPrice))}</strong><div><button on:click={() => void finishTrade(pendingPrice)}>USE THIS PRICE</button><button on:click={() => { pendingPrice = undefined; mode = 'unit'; unitPrice = ''; }}>ENTER PRICE</button></div></div>{/if}
       {#if error}<p class="form-error">{error}</p>{/if}
       {#if saveError}<div class="mutation-blocked"><strong>SAVE NOT APPLIED</strong><p>{saveError.message}</p>{#each saveBlockers as blocker}<div><span>{blockingLabel(blocker)}</span><button on:click={() => onOpenEvent(blocker.id)}>REVIEW</button></div>{/each}{#if canRemoveRedundantAdjustments}<p>Turning off tracked Cash / Debt makes {removableSaveBlockers.length === 1 ? 'this later adjustment' : 'these later adjustments'} redundant. Confirm to remove {removableSaveBlockers.length === 1 ? 'it' : 'them'} and save the trade together.</p><button class="confirm-combined" disabled={working} on:click={() => void saveRemovingAdjustments()}>SAVE + REMOVE REDUNDANT ADJUSTMENT{removableSaveBlockers.length === 1 ? '' : 'S'}</button>{/if}</div>{/if}
       <button class="apply-button full-action" disabled={working} on:click={() => void submitTrade()}><Icon name="check" size={13}/>{working ? 'WORKING' : editing ? 'SAVE TRANSACTION' : `ADD ${screen.toUpperCase()}`}</button>

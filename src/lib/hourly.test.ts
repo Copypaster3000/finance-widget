@@ -4,6 +4,8 @@ import type { Holding, HourlyResult, PriceProvider } from './types';
 
 const stock: Holding = { id: 'stock', symbol: 'AAA', type: 'stock', quantity: 2 };
 const crypto: Holding = { id: 'crypto', symbol: 'BTC', type: 'crypto', quantity: 1 };
+const startDate = '2020-01-02';
+const atHour = (hour: number) => new Date(2020, 0, 2, hour).toISOString();
 
 function hourlyProvider(result: HourlyResult): PriceProvider {
   return {
@@ -16,73 +18,73 @@ describe('hourly portfolio snapshots', () => {
   it('aggregates hourly bars once and carries the latest asset price forward', async () => {
     const provider = hourlyProvider({ series: [
       { symbol: 'AAA', assetType: 'stock', points: [
-        { timestamp: '2026-08-17T00:00:00.000Z', price: 10 },
-        { timestamp: '2026-08-17T02:00:00.000Z', price: 12 }
+        { timestamp: atHour(0), price: 10 },
+        { timestamp: atHour(2), price: 12 }
       ] },
       { symbol: 'BTC', assetType: 'crypto', points: [
-        { timestamp: '2026-08-17T00:00:00.000Z', price: 20 },
-        { timestamp: '2026-08-17T01:00:00.000Z', price: 21 },
-        { timestamp: '2026-08-17T02:00:00.000Z', price: 22 }
+        { timestamp: atHour(0), price: 20 },
+        { timestamp: atHour(1), price: 21 },
+        { timestamp: atHour(2), price: 22 }
       ] }
     ], errors: [] });
 
-    const result = await syncHourlyPortfolio(provider, [stock, crypto], EMPTY_HOURLY_CACHE, '2026-08-17', '2026-08-17T02:00:00.000Z');
+    const result = await syncHourlyPortfolio(provider, [stock, crypto], EMPTY_HOURLY_CACHE, startDate, atHour(2));
 
     expect(result.cache.points.map((point) => point.value)).toEqual([40, 41, 46]);
-    expect(result.cache.coveredThrough).toBe('2026-08-17T02:00:00.000Z');
+    expect(result.cache.coveredThrough).toBe(atHour(2));
     expect(result.cache.assetPrices['stock:AAA'].price).toBe(12);
   });
 
   it('does not refetch an hour that is already covered', async () => {
     const provider = hourlyProvider({ series: [], errors: [] });
-    const cache = { ...EMPTY_HOURLY_CACHE, coveredThrough: '2026-08-17T02:00:00.000Z' };
+    const cache = { ...EMPTY_HOURLY_CACHE, coveredThrough: atHour(2) };
 
-    await syncHourlyPortfolio(provider, [stock], cache, '2026-08-17', '2026-08-17T02:00:00.000Z');
+    await syncHourlyPortfolio(provider, [stock], cache, startDate, atHour(2));
 
     expect(provider.getHourlyPrices).not.toHaveBeenCalled();
   });
 
   it('carries cached stock prices without requesting them outside market hours', async () => {
     const provider = hourlyProvider({ series: [
-      { symbol: 'BTC', assetType: 'crypto', points: [{ timestamp: '2026-08-17T03:00:00.000Z', price: 23 }] }
+      { symbol: 'BTC', assetType: 'crypto', points: [{ timestamp: atHour(3), price: 23 }] }
     ], errors: [] });
     const cache = {
       ...EMPTY_HOURLY_CACHE,
-      coveredThrough: '2026-08-17T02:00:00.000Z',
-      points: [{ date: '2026-08-17T02:00:00.000Z', value: 46 }],
+      coveredThrough: atHour(2),
+      points: [{ date: atHour(2), value: 46 }],
       assetPrices: {
-        'stock:AAA': { timestamp: '2026-08-17T02:00:00.000Z', price: 12 },
-        'crypto:BTC': { timestamp: '2026-08-17T02:00:00.000Z', price: 22 }
+        'stock:AAA': { timestamp: atHour(2), price: 12 },
+        'crypto:BTC': { timestamp: atHour(2), price: 22 }
       }
     };
 
-    const result = await syncHourlyPortfolio(provider, [stock, crypto], cache, '2026-08-17', '2026-08-17T03:00:00.000Z', [crypto]);
+    const result = await syncHourlyPortfolio(provider, [stock, crypto], cache, startDate, atHour(3), [crypto]);
 
-    expect(provider.getHourlyPrices).toHaveBeenCalledWith([crypto], '2026-08-17T03:00:00.000Z', '2026-08-17T03:00:00.000Z');
+    expect(provider.getHourlyPrices).toHaveBeenCalledWith([crypto], atHour(3), atHour(3));
     expect(result.cache.points.at(-1)?.value).toBe(47);
     expect(result.errors).toEqual([]);
   });
 
   it('preserves old totals and uses edited quantities only for new hours', async () => {
     const provider = hourlyProvider({ series: [
-      { symbol: 'AAA', assetType: 'stock', points: [{ timestamp: '2026-08-17T03:00:00.000Z', price: 13 }] },
-      { symbol: 'BTC', assetType: 'crypto', points: [{ timestamp: '2026-08-17T03:00:00.000Z', price: 23 }] }
+      { symbol: 'AAA', assetType: 'stock', points: [{ timestamp: atHour(3), price: 13 }] },
+      { symbol: 'BTC', assetType: 'crypto', points: [{ timestamp: atHour(3), price: 23 }] }
     ], errors: [] });
     const cache = {
       ...EMPTY_HOURLY_CACHE,
-      coveredThrough: '2026-08-17T02:00:00.000Z',
-      points: [{ date: '2026-08-17T02:00:00.000Z', value: 46 }],
+      coveredThrough: atHour(2),
+      points: [{ date: atHour(2), value: 46 }],
       assetPrices: {
-        'stock:AAA': { timestamp: '2026-08-17T02:00:00.000Z', price: 12 },
-        'crypto:BTC': { timestamp: '2026-08-17T02:00:00.000Z', price: 22 }
+        'stock:AAA': { timestamp: atHour(2), price: 12 },
+        'crypto:BTC': { timestamp: atHour(2), price: 22 }
       }
     };
 
-    const result = await syncHourlyPortfolio(provider, [{ ...stock, quantity: 3 }, crypto], cache, '2026-08-17', '2026-08-17T03:00:00.000Z');
+    const result = await syncHourlyPortfolio(provider, [{ ...stock, quantity: 3 }, crypto], cache, startDate, atHour(3));
 
     expect(result.cache.points).toEqual([
-      { date: '2026-08-17T02:00:00.000Z', value: 46 },
-      { date: '2026-08-17T03:00:00.000Z', value: 62 }
+      { date: atHour(2), value: 46 },
+      { date: atHour(3), value: 62 }
     ]);
   });
 

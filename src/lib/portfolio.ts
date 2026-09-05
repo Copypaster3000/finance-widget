@@ -1,12 +1,14 @@
 import type { Holding, LedgerAccountState, PortfolioSummary, Position, Quote } from './types';
+import { sanitizeQuotes, quoteFreshness } from './quotePolicy';
+import { safeNumber, MAX_QUANTITY } from './decimal';
 
 export function normalizeQuantity(value: unknown): number {
   const quantity = typeof value === 'number' ? value : Number(value);
-  return Number.isFinite(quantity) && quantity >= 0 ? quantity : 0;
+  return Number.isFinite(quantity) && quantity >= 0 ? safeNumber(quantity, MAX_QUANTITY) : 0;
 }
 
 export function calculatePortfolio(holdings: Holding[], quotes: Quote[]): PortfolioSummary {
-  const quoteMap = new Map(quotes.map((quote) => [`${quote.assetType}:${quote.symbol.toUpperCase()}`, quote]));
+  const quoteMap = new Map(sanitizeQuotes(quotes).map((quote) => [`${quote.assetType}:${quote.symbol.toUpperCase()}`, quote]));
   const positions = holdings.map((holding) => {
     const quantity = normalizeQuantity(holding.quantity);
     const quote = quoteMap.get(`${holding.type}:${holding.symbol.toUpperCase()}`);
@@ -15,7 +17,7 @@ export function calculatePortfolio(holdings: Holding[], quotes: Quote[]): Portfo
     return { ...holding, quantity, quote, value, allocation: 0, dailyChangeValue };
   });
 
-  const totalValue = positions.reduce((total, position) => total + position.value, 0);
+  const totalValue = safeNumber(positions.reduce((total, position) => total + position.value, 0));
   for (const position of positions) position.allocation = totalValue > 0 ? (position.value / totalValue) * 100 : 0;
   positions.sort((left, right) => right.value - left.value);
 
@@ -28,7 +30,7 @@ export function calculatePortfolio(holdings: Holding[], quotes: Quote[]): Portfo
 }
 
 export function calculateLedgerPortfolio(account: LedgerAccountState, quotes: Quote[]): PortfolioSummary {
-  const quoteMap = new Map(quotes.map((quote) => [`${quote.assetType}:${quote.symbol.toUpperCase()}`, quote]));
+  const quoteMap = new Map(sanitizeQuotes(quotes).map((quote) => [`${quote.assetType}:${quote.symbol.toUpperCase()}`, quote]));
   const positions: Position[] = account.positions.map((state) => {
     const quote = quoteMap.get(`${state.asset.type}:${state.asset.symbol.toUpperCase()}`);
     const value = quote && Number.isFinite(quote.price) ? state.quantity * quote.price : 0;
@@ -39,7 +41,8 @@ export function calculateLedgerPortfolio(account: LedgerAccountState, quotes: Qu
   positions.push({ id: 'debt', symbol: 'MARGIN DEBT', type: 'debt', quantity: account.debt, value: -account.debt, allocation: 0 });
 
   const grossAssets = positions.filter((position) => position.type !== 'debt').reduce((total, position) => total + Math.max(0, position.value), 0);
-  const totalValue = grossAssets - account.debt;
+  safeNumber(grossAssets); safeNumber(account.cash); safeNumber(account.debt);
+  const totalValue = safeNumber(grossAssets - account.debt);
   for (const position of positions) position.allocation = grossAssets > 0 ? (Math.abs(position.value) / grossAssets) * 100 : 0;
   positions.sort((left, right) => right.value - left.value);
 
@@ -57,5 +60,5 @@ export function isQuoteUsable(value: unknown): value is Pick<Quote, 'price'> {
 }
 
 export function isQuoteStale(quote: Quote, now = Date.now(), maxAgeMs = 15 * 60_000): boolean {
-  return now - quote.timestamp > maxAgeMs;
+  return quoteFreshness(quote, now, quote.session) !== 'fresh' || now - quote.timestamp > maxAgeMs;
 }

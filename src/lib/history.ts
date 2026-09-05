@@ -1,4 +1,5 @@
 import { normalizeQuantity } from './portfolio';
+import { MAX_PRICE } from './decimal';
 import { isCalendarDate, shiftCalendarDate } from './calendar';
 import type {
   HistoricalCache,
@@ -46,7 +47,7 @@ function sanitizePoints(points: unknown): HistoricalPricePoint[] {
   const valid = points.filter((point): point is HistoricalPricePoint => {
     if (!point || typeof point !== 'object') return false;
     const candidate = point as Partial<HistoricalPricePoint>;
-    return isIsoDate(candidate.date) && typeof candidate.price === 'number' && Number.isFinite(candidate.price) && candidate.price > 0;
+    return isIsoDate(candidate.date) && typeof candidate.price === 'number' && Number.isFinite(candidate.price) && candidate.price > 0 && candidate.price <= MAX_PRICE;
   });
   return [...new Map(valid.map((point) => [point.date, point])).values()].sort((a, b) => a.date.localeCompare(b.date));
 }

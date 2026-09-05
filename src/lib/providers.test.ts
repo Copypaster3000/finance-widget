@@ -91,6 +91,7 @@ describe('Yahoo Finance normalization', () => {
   it('normalizes sorted EOD history and rejects unavailable data', () => {
     const payload = { chart: { result: [{
       timestamp: [1_786_924_800, 1_787_011_200, 1_787_097_600],
+      meta: { currency: 'USD' },
       indicators: { quote: [{ close: [4, null, 4.2] }] }
     }] } };
     expect(normalizeYahooHistory(payload, otc, '2026-08-17', '2026-08-19')).toEqual([
@@ -98,18 +99,19 @@ describe('Yahoo Finance normalization', () => {
     ]);
     expect(() => normalizeYahooQuote({ chart: { result: [] } }, otc)).toThrow(/unavailable/i);
     expect(() => normalizeYahooHistory({ chart: { error: { description: 'rate limited' } } }, otc, '2026-08-17', '2026-08-19')).toThrow(/rate limited/i);
-    expect(() => normalizeYahooHistory({ chart: { result: [{ timestamp: [1_786_924_800], indicators: { quote: [{ close: [null] }] } }] } }, otc, '2026-08-17', '2026-08-19')).toThrow(/malformed/i);
+    expect(() => normalizeYahooHistory({ chart: { result: [{ meta: {currency:'USD'}, timestamp: [1_786_924_800], indicators: { quote: [{ close: [null] }] } }] } }, otc, '2026-08-17', '2026-08-19')).toThrow(/malformed/i);
   });
 
   it('normalizes UTC hourly bars and rejects malformed hourly data', () => {
     const payload = { chart: { result: [{
       timestamp: [1_786_924_800, 1_786_928_400],
+      meta: { currency: 'USD' },
       indicators: { quote: [{ close: [4, 4.1] }] }
     }] } };
     expect(normalizeYahooHourly(payload, otc, '2026-08-17T00:00:00.000Z', '2026-08-17T01:00:00.000Z')).toEqual([
       { timestamp: '2026-08-17T00:00:00.000Z', price: 4 },
       { timestamp: '2026-08-17T01:00:00.000Z', price: 4.1 }
     ]);
-    expect(() => normalizeYahooHourly({ chart: { result: [{ timestamp: [1_786_924_800] }] } }, otc, '2026-08-17T00:00:00.000Z', '2026-08-17T01:00:00.000Z')).toThrow(/unavailable/i);
+    expect(() => normalizeYahooHourly({ chart: { result: [{ meta: {currency:'USD'}, timestamp: [1_786_924_800] }] } }, otc, '2026-08-17T00:00:00.000Z', '2026-08-17T01:00:00.000Z')).toThrow(/unavailable/i);
   });
 });

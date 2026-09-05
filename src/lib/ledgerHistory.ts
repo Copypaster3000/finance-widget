@@ -1,4 +1,6 @@
-import { replayLedger } from './ledger';
+import { compareLedgerEvents, createLedgerCursor, replayLedger } from './ledger';
+import { safeNumber, MAX_PRICE } from './decimal';
+import { sanitizeQuotes } from './quotePolicy';
 import { calendarDateFromTimestamp, localCalendarEndTimestamp, localCalendarStartTimestamp } from './calendar';
 import type { HistoryStartMode, Holding, HourlyPricePoint, LedgerPriceCache, LedgerPriceCacheEntry, PortfolioHistoryPoint, PortfolioLedger, PriceProvider, Quote } from './types';
 
@@ -10,7 +12,7 @@ function key(type: string, symbol: string): string { return `${type}:${symbol.tr
 function validPoint(value: unknown): value is HourlyPricePoint {
   if (!value || typeof value !== 'object') return false;
   const point = value as Partial<HourlyPricePoint>;
-  return typeof point.timestamp === 'string' && Number.isFinite(Date.parse(point.timestamp)) && typeof point.price === 'number' && Number.isFinite(point.price) && point.price > 0;
+  return typeof point.timestamp === 'string' && Number.isFinite(Date.parse(point.timestamp)) && typeof point.price === 'number' && Number.isFinite(point.price) && point.price > 0 && point.price <= MAX_PRICE;
 }
 
 function sanitizePoints(value: unknown): HourlyPricePoint[] {
@@ -23,7 +25,7 @@ export function sanitizeLedgerPriceCache(value: unknown): LedgerPriceCache {
   const entries = Object.fromEntries(Object.entries((value as Partial<LedgerPriceCache>).entries ?? {}).flatMap(([entryKey, raw]) => {
     if (!raw || typeof raw !== 'object') return [];
     const entry = raw as Partial<LedgerPriceCacheEntry>;
-    if (!entry.assetId || !entry.symbol || !['stock', 'crypto'].includes(entry.assetType ?? '') || !entry.coveredThrough || !Number.isFinite(Date.parse(entry.coveredThrough))) return [];
+    if (typeof entry.assetId !== 'string' || typeof entry.symbol !== 'string' || !entry.symbol || !['stock', 'crypto'].includes(entry.assetType ?? '') || typeof entry.coveredThrough !== 'string' || !Number.isFinite(Date.parse(entry.coveredThrough))) return [];
     return [[entryKey, { assetId: entry.assetId, symbol: entry.symbol.toUpperCase(), assetType: entry.assetType, coveredThrough: entry.coveredThrough, points: sanitizePoints(entry.points) } as LedgerPriceCacheEntry]];
   }));
   return { schemaVersion: 1, entries };
@@ -45,7 +47,7 @@ export async function syncLedgerPriceCache(
   for (const holding of holdings) {
     const entryKey = key(holding.type, holding.symbol);
     const existing = entries[entryKey];
-    const configuredStart = `${historyStartDate}T00:00:00.000Z`;
+    const configuredStart = localCalendarStartTimestamp(historyStartDate);
     const startTime = existing?.coveredThrough
       ? new Date(Date.parse(existing.coveredThrough) + HOUR_MS).toISOString()
       : configuredStart;
@@ -96,11 +98,17 @@ export function calculateLedgerHistory(
   if (startTimestamp <= endTime && !updates.has(startTimestamp)) updates.set(startTimestamp, []);
   const latestPrices = new Map<string, number>();
   const result: PortfolioHistoryPoint[] = [];
+  const cursor = createLedgerCursor(ledger);
+  const orderedEvents = [...ledger.events].sort(compareLedgerEvents);
+  let eventIndex = 0;
   for (const timestamp of [...updates.keys()].sort()) {
     for (const update of updates.get(timestamp) ?? []) latestPrices.set(update.assetKey, update.price);
     const date = providerCalendarDate(timestamp);
     if (date < effectiveStartDate) continue;
-    const account = replayLedger(ledger, date).state;
+    while (eventIndex < orderedEvents.length && orderedEvents[eventIndex].date <= date) cursor.apply(orderedEvents[eventIndex++]);
+    const snapshot = cursor.snapshot(date, true);
+    if (snapshot.issues.length) throw new Error('History cannot be valued from invalid financial records.');
+    const account = snapshot.state;
     let value = account.cash - account.debt;
     let complete = true;
     for (const position of account.positions) {
@@ -109,13 +117,13 @@ export function calculateLedgerHistory(
       if (price === undefined) { complete = false; break; }
       value += position.quantity * price;
     }
-    if (complete && Number.isFinite(value)) result.push({ date: timestamp, value });
+    if (complete) result.push({ date: timestamp, value: safeNumber(value) });
   }
   return [...new Map(result.map((point) => [point.date, point])).values()].sort((a, b) => a.date.localeCompare(b.date));
 }
 
 export function liveLedgerValue(ledger: PortfolioLedger, quotes: Quote[]): number {
   const account = replayLedger(ledger).state;
-  const prices = new Map(quotes.map((quote) => [key(quote.assetType, quote.symbol), quote.price]));
+  const prices = new Map(sanitizeQuotes(quotes).map((quote) => [key(quote.assetType, quote.symbol), quote.price]));
   return account.positions.reduce((total, position) => total + position.quantity * (prices.get(key(position.asset.type, position.asset.symbol)) ?? 0), account.cash - account.debt);
 }

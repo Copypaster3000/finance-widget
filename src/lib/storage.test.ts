@@ -11,7 +11,7 @@ describe('native persistence', () => {
   });
   afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
   it('retries native read errors without substituting browser data', async () => {
-    mocked.invoke.mockRejectedValueOnce('Cannot read').mockResolvedValue({});
+    mocked.invoke.mockRejectedValueOnce('Cannot read').mockResolvedValue({data:{},metadata:{state:'firstRunEmpty'}});
     const { loadState } = await import('./storage');
     await loadState(); expect(mocked.invoke).toHaveBeenCalledTimes(2);
   });
@@ -21,6 +21,15 @@ describe('native persistence', () => {
     const { loadState } = await import('./storage');
     await expect(loadState()).rejects.toThrow('Bridge unavailable');
     expect(mocked.invoke).toHaveBeenCalledTimes(4);
+  });
+  it('returns recovery metadata and discards bad caches without discarding the ledger',async()=>{
+    mocked.invoke.mockResolvedValue({data:{'portfolio-ledger-v1':{schemaVersion:2,assets:[],events:[]},'quote-cache':42,'history-cache-v1':'bad','ledger-price-history-v1':{schemaVersion:1,entries:{bad:{symbol:42}}}},metadata:{state:'portfolioRecovered',recoveryReason:'damaged primary',backupModifiedAt:1234}});
+    const {loadState}=await import('./storage');const state=await loadState();
+    expect(state.metadata.state).toBe('portfolioRecovered');expect(state.quotes).toEqual([]);expect(state.historyCache).toEqual({});expect(state.ledgerPriceCache.entries).toEqual({});expect(state.ledgerMigrated).toBe(false);
+  });
+  it('rejects malformed authoritative history even if a bridge returns it',async()=>{
+    mocked.invoke.mockResolvedValue({data:{'portfolio-ledger-v1':{schemaVersion:2,assets:[],events:[null]}},metadata:{state:'portfolioLoaded'}});
+    const {loadState}=await import('./storage');await expect(loadState()).rejects.toThrow('INTEGRITY_ERROR');expect(mocked.invoke).toHaveBeenCalledTimes(1);
   });
   it('reports failed writes and never calls them successful browser saves', async () => {
     mocked.invoke.mockRejectedValue('Disk full');

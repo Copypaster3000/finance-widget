@@ -1,4 +1,6 @@
 import { normalizeQuantity } from './portfolio';
+import { MAX_MONEY, MAX_PRICE } from './decimal';
+import { localCalendarStartTimestamp } from './calendar';
 import type { HistoryRange, Holding, HourlyPricePoint, PortfolioDayChange, PortfolioHistoryPoint, PortfolioHourlyCache, PriceProvider } from './types';
 
 const HOUR_MS = 3_600_000;
@@ -43,7 +45,7 @@ function validHourlyPoint(value: unknown): value is HourlyPricePoint {
   if (!value || typeof value !== 'object') return false;
   const point = value as Partial<HourlyPricePoint>;
   return typeof point.timestamp === 'string' && Number.isFinite(Date.parse(point.timestamp)) &&
-    typeof point.price === 'number' && Number.isFinite(point.price) && point.price > 0;
+    typeof point.price === 'number' && Number.isFinite(point.price) && point.price > 0 && point.price <= MAX_PRICE;
 }
 
 function sanitizeValuePoints(points: unknown): PortfolioHistoryPoint[] {
@@ -52,7 +54,7 @@ function sanitizeValuePoints(points: unknown): PortfolioHistoryPoint[] {
     if (!point || typeof point !== 'object') return false;
     const candidate = point as Partial<PortfolioHistoryPoint>;
     return typeof candidate.date === 'string' && Number.isFinite(Date.parse(candidate.date)) &&
-      typeof candidate.value === 'number' && Number.isFinite(candidate.value);
+      typeof candidate.value === 'number' && Number.isFinite(candidate.value) && Math.abs(candidate.value) <= MAX_MONEY;
   });
   return [...new Map(valid.map((point) => [point.date, point])).values()].sort((a, b) => a.date.localeCompare(b.date));
 }
@@ -75,7 +77,7 @@ export function recordRecentPortfolio(
   now = Date.now()
 ): PortfolioHourlyCache {
   const cache = sanitizeHourlyCache(cacheValue);
-  if (!Number.isFinite(value)) return cache;
+  if (!Number.isFinite(value) || Math.abs(value) > MAX_MONEY) return cache;
   const cutoff = now - HOUR_MS;
   const recentPoints = sanitizeValuePoints([
     ...cache.recentPoints.filter((point) => Date.parse(point.date) >= cutoff),
@@ -97,7 +99,7 @@ export async function syncHourlyPortfolio(
   if (!active.length) return { cache, errors: [], changed: false };
   if (!provider.getHourlyPrices) return { cache, errors: ['Hourly history is not supported by this provider'], changed: false };
 
-  const configuredStart = `${historyStartDate}T00:00:00.000Z`;
+  const configuredStart = new Date(localCalendarStartTimestamp(historyStartDate)).toISOString();
   const nextHour = cache.coveredThrough ? new Date(Date.parse(cache.coveredThrough) + HOUR_MS).toISOString() : configuredStart;
   const startTime = nextHour < configuredStart ? configuredStart : nextHour;
   if (startTime > endTime) return { cache, errors: [], changed: false };
@@ -112,8 +114,9 @@ export async function syncHourlyPortfolio(
     const key = `${item.assetType}:${item.symbol.toUpperCase()}`;
     seriesKeys.add(key);
     for (const point of item.points) {
+      if (!validHourlyPoint(point)) continue;
       const timestamp = hourTimestamp(point.timestamp);
-      if (timestamp < startTime || timestamp > endTime || !validHourlyPoint(point)) continue;
+      if (timestamp < startTime || timestamp > endTime) continue;
       const updates = events.get(timestamp) ?? [];
       updates.push({ key, price: point.price });
       events.set(timestamp, updates);

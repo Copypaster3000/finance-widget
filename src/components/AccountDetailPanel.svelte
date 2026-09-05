@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { AccountActivity, LedgerAsset, LedgerEvent, LedgerEventPreviewResult, LedgerMutationError } from '../lib/types';
-  import { nextSequence } from '../lib/ledger';
+  import { datedBalanceDelta, nextSequence } from '../lib/ledger';
   import { normalizedMoney } from '../lib/transactions';
   import { money, signedMoney } from '../lib/format';
   import Icon from './Icon.svelte';
@@ -80,20 +80,17 @@
     const isSet = currentAction === 'cash_set' || currentAction === 'cash_clear' || currentAction === 'debt_set' || currentAction === 'debt_clear';
     const normalized = normalizedMoney(currentAmount);
     if (normalized === undefined || Number(normalized) < 0) return undefined;
-    const base = currentEditing ? currentActivity?.balanceBefore : currentBalance;
     let eventType: LedgerEvent['eventType'];
     let eventAmount = normalized;
     if (isSet) {
-      if (base === undefined) return undefined;
       eventType = kind === 'cash' ? 'cash_adjustment' : 'debt_adjustment';
-      const delta = Number(normalized) - base;
-      eventAmount = normalizedMoney(delta, true) ?? '';
+      eventAmount = datedBalanceDelta({ schemaVersion: 2, assets, events: currentEvents }, kind, normalized, currentDate, currentEditing) ?? '';
       if (!eventAmount || Number(eventAmount) === 0) return undefined;
     } else eventType = currentAction as LedgerEvent['eventType'];
     if (Number(eventAmount) <= 0 && eventType !== 'cash_adjustment' && eventType !== 'debt_adjustment') return undefined;
     const baseEvent = {
       id: currentEditing?.id ?? '__preview__', eventType, date: currentDate,
-      sequence: currentEditing?.sequence ?? nextSequence(currentEvents, currentDate), amount: eventAmount,
+      sequence: currentEditing?.date === currentDate ? currentEditing.sequence : nextSequence(currentEvents, currentDate), amount: eventAmount,
       createdAt: currentEditing?.createdAt ?? 'preview', updatedAt: 'preview'
     };
     return eventType === 'debt_payment' ? { ...baseEvent, eventType, source } : baseEvent as LedgerEvent;
@@ -168,18 +165,18 @@
       </div>
     </section>
   {:else}
-    <section class="detail-card entry-card">
+    <section class="detail-card entry-card" on:input={() => error = ''}>
       <div class="detail-code">{editing ? 'EDIT' : 'ADD'} / {actionTitle(action)}</div>
       <div class="form-grid">
         <label>DATE<input type="date" max={today()} bind:value={date}/></label>
-        {#if !action.endsWith('clear')}<label>{action.includes('set') ? 'TARGET BALANCE' : 'AMOUNT'}<input type="number" step="0.01" min="0" bind:value={amount}/></label>{/if}
+        {#if !action.endsWith('clear')}<label>{action.includes('set') ? 'TARGET BALANCE' : 'AMOUNT'}<input type="text" inputmode="decimal" bind:value={amount}/></label>{/if}
       </div>
       {#if action === 'debt_payment'}
         <div class="setting-block compact-setting"><span class="setting-label">PAYMENT SOURCE</span><div class="segmented"><button aria-pressed={paymentSource === 'external'} class:active={paymentSource === 'external'} on:click={() => paymentSource = 'external'}>EXTERNAL</button><button aria-pressed={paymentSource === 'cash'} class:active={paymentSource === 'cash'} on:click={() => paymentSource = 'cash'}>FROM CASH</button></div></div>
         <p class="form-hint">External payment leaves Cash unchanged. From Cash reduces both balances and requires sufficient Cash.</p>
       {:else if action === 'cash_deposit'}<p class="form-hint">Added funds pay Debt first; the remainder becomes Cash.</p>
       {:else if action === 'cash_withdrawal'}<p class="form-hint">Removed funds use Cash first; any shortfall increases Debt.</p>
-      {:else if action.includes('set')}<p class="form-hint">Records a balancing entry. Earlier activity remains intact.</p>
+      {:else if action.includes('set')}<p class="form-hint">Sets the balance on the selected date. New entries follow that day's activity; later transactions still apply.</p>
       {:else if action.endsWith('clear')}<p class="form-hint">Records a balancing entry to zero. Earlier activity remains intact.</p>
       {:else}<p class="form-hint">Establishes the opening balance without changing the other account.</p>{/if}
       {#if consequence}
@@ -189,6 +186,7 @@
       {/if}
       {#if previewResult?.issues.length}<p class="form-error">{previewResult.issues[0].message.toUpperCase()}</p>{/if}
       {#if error}<p class="form-error">{error}</p>{/if}
+      {#if amount !== '' && !proposed}<p class="form-hint">Enter a different balance in decimal notation, up to 2 decimal places and 1 trillion USD.</p>{/if}
       <button class="apply-button full-action" disabled={working || !proposed || Boolean(previewResult?.issues.length)} on:click={() => void save()}><Icon name="check" size={13}/>{editing ? 'SAVE SOURCE EVENT' : actionTitle(action)}</button>
       {#if editing}<button class="danger-action" on:click={() => editing && beginDelete(editing)}>DELETE SOURCE EVENT</button>{/if}
     </section>
