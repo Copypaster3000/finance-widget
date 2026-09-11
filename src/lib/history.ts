@@ -19,13 +19,6 @@ export function shiftDate(date: string, days: number): string {
   return shiftCalendarDate(date, days);
 }
 
-export function datesBetween(startDate: string, endDate: string): string[] {
-  if (!isIsoDate(startDate) || !isIsoDate(endDate) || startDate > endDate) return [];
-  const dates: string[] = [];
-  for (let date = startDate; date <= endDate; date = shiftDate(date, 1)) dates.push(date);
-  return dates;
-}
-
 export function historyKey(provider: ProviderKind, type: Holding['type'], symbol: string): string {
   return `${provider}:${type}:${symbol.trim().toUpperCase()}`;
 }

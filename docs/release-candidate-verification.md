@@ -1,16 +1,16 @@
 # Release candidate verification
 
-Current candidate: **0.1.5**. Publication is a separate, final action after manual verification. Do not upload an older installer just because it remains in the build directory.
+Current candidate: **0.1.6**. Publication is a separate, final action after manual verification. Do not upload an older installer just because it remains in the build directory.
 
 ## Current verification status
 
-See [safe cleanup verification](safe-cleanup-verification.md) for this candidate's automated results and scoped changes. Earlier installed verification does not certify newly built bits.
+The 0.1.6 follow-up adds only `core:window:allow-set-min-size` to the main window capability and removes the unreferenced `datesBetween` helper. Focused tests cover startup and portfolio/asset/BUY/SELL/Cash/Debt/Settings transitions at 100% and 200% scale: portfolio minimum 120 × 192 logical pixels, editor minimum 360 × 480, with undersized windows enlarged for editing. Six targeted tests and all 209 frontend tests passed; 17 native tests passed; Svelte checking reported zero errors/warnings. These mocked native-operation tests do not replace installed visual verification. See [safe cleanup verification](safe-cleanup-verification.md) for the preceding 0.1.5 cleanup. Earlier installed verification does not certify newly built bits.
 
 **Pending:** disposable installed-profile regression, high-DPI visual verification, ordinary Start Menu/Search/Explorer launch parity, restart testing, and the subsequent real-profile smoke test. Automated tests are not evidence that these installed scenarios passed. No public release is authorized by this record.
 
 ## Automated gates
 
-Run `npm run check`, `npm test`, `npm run build`, native `cargo test --manifest-path src-tauri/Cargo.toml --lib`, `npm run tauri build`, and `npm run privacy:check`. Stage the exact version with `npm run release:stage`; use only the matching installer and checksum under `src-tauri/target/release-candidate/0.1.5/`.
+Run `npm run check`, `npm test`, `npm run build`, native `cargo test --manifest-path src-tauri/Cargo.toml --lib`, `npm run tauri build`, and `npm run privacy:check`. Stage the exact version with `npm run release:stage`; use only the matching installer and checksum under `src-tauri/target/release-candidate/0.1.6/`.
 
 ## Disposable installed-profile gates (not implied by unit tests)
 

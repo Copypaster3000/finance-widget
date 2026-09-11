@@ -5,6 +5,8 @@ import { DEFAULT_CONFIG } from './lib/defaults';
 import { EMPTY_HOURLY_CACHE } from './lib/hourly';
 import { EMPTY_LEDGER_PRICE_CACHE } from './lib/ledgerHistory';
 import App from './App.svelte';
+import capability from '../src-tauri/capabilities/default.json';
+import { migrateLegacyHoldings } from './lib/ledger';
 
 const mocks = vi.hoisted(() => ({ loadState: vi.fn(), saveConfig: vi.fn(), native: vi.fn(), setMinSize: vi.fn(), setAlwaysOnTop: vi.fn(), getWindow: vi.fn() }));
 vi.mock('./lib/storage', () => ({
@@ -23,6 +25,61 @@ beforeEach(() => {
   mocks.loadState.mockResolvedValue({ config: structuredClone(DEFAULT_CONFIG), ledger: { schemaVersion: 2, assets: [], events: [] }, quotes: [], historyCache: {}, ledgerPriceCache: EMPTY_LEDGER_PRICE_CACHE, hourlyHistory: EMPTY_HOURLY_CACHE, ledgerMigrated: false, configMigrated: false, metadata: { state: 'firstRunEmpty' } });
 });
 afterEach(cleanup);
+
+describe('minimum window size capability and transitions', () => {
+  it('grants the narrow minimum-size permission to the main window', () => {
+    expect(capability.windows).toEqual(['main']);
+    expect(capability.permissions).toContain('core:window:allow-set-min-size');
+    expect(capability.permissions).not.toContain('core:window:default');
+  });
+
+  it.each([1, 2])('preserves editing minima across all views at scale %s', async scale => {
+    mocks.native.mockReturnValue(true);
+    const nativeWindow = mocks.getWindow();
+    nativeWindow.outerSize.mockResolvedValue({ width: 120 * scale, height: 192 * scale });
+    nativeWindow.scaleFactor.mockResolvedValue(scale);
+    nativeWindow.setSize = vi.fn().mockResolvedValue(undefined);
+    // Model the actual permission gate, not an unconditionally successful mock.
+    mocks.setMinSize.mockImplementation(async () => {
+      if (!capability.permissions.includes('core:window:allow-set-min-size')) throw new Error('permission denied');
+    });
+    const state = await mocks.loadState();
+    state.config.appearance.showCash = true;
+    state.config.appearance.showDebt = true;
+    state.ledger = migrateLegacyHoldings([{ id: 'synthetic', symbol: 'SYNTH', type: 'stock', quantity: 1 }], '2020-01-01');
+    state.config.historyStartDate = '2020-01-01';
+    render(App);
+    await waitFor(() => expect(mocks.setMinSize).toHaveBeenLastCalledWith(expect.objectContaining({ width: 120, height: 192 })));
+    async function editing() {
+      await waitFor(() => expect(mocks.setMinSize).toHaveBeenLastCalledWith(expect.objectContaining({ width: 360, height: 480 })));
+      expect(nativeWindow.setSize).toHaveBeenLastCalledWith(expect.objectContaining({ width: 360, height: 480 }));
+      expect(screen.queryByText(/WINDOW UPDATE FAILED/)).toBeNull();
+    }
+    async function portfolio() {
+      await fireEvent.click(screen.getByRole('button', { name: 'Back to portfolio' }));
+      await waitFor(() => expect(mocks.setMinSize).toHaveBeenLastCalledWith(expect.objectContaining({ width: 120, height: 192 })));
+      expect(screen.queryByText(/WINDOW UPDATE FAILED/)).toBeNull();
+    }
+    await fireEvent.click(await screen.findByRole('button', { name: /^SYNTH / }));
+    await editing();
+    await fireEvent.click(screen.getByRole('button', { name: '+ BUY' }));
+    expect(screen.getByRole('button', { name: 'ADD BUY' })).toBeTruthy();
+    await editing();
+    await fireEvent.click(screen.getByRole('button', { name: 'SYNTH' }));
+    await fireEvent.click(screen.getByRole('button', { name: '+ SELL' }));
+    expect(screen.getByRole('button', { name: 'ADD SELL' })).toBeTruthy();
+    await editing();
+    await portfolio();
+    for (const name of [/^CASH /, /^MARGIN DEBT /]) {
+      await fireEvent.click(screen.getByRole('button', { name }));
+      await editing();
+      await portfolio();
+    }
+    await fireEvent.click(screen.getByRole('button', { name: 'Open settings' }));
+    await editing();
+    await portfolio();
+  });
+});
 describe('application operation failures', () => {
   it('retains the saved range on failure, reports it, and permits retry', async () => {
     render(App);
