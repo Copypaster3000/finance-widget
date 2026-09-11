@@ -52,10 +52,23 @@ export function resolveFeedState(input: { holdingCount: number; hasStocks: boole
   return 'unavailable';
 }
 
-function sourceName(quotes: Quote[]): string {
-  if (quotes.some((quote) => quote.status === 'mock')) return 'Demo';
-  if (quotes.some((quote) => quote.status === 'cached')) return 'Cache';
-  return providerLabel(quotes[0]?.provider).replaceAll('_', ' ');
+function quoteSource(quote: Quote): string {
+  if (quote.status === 'mock') return 'Demo';
+  if (quote.status === 'cached') return 'Cache';
+  return providerLabel(quote.provider).replaceAll('_', ' ');
+}
+
+// Quote status describes the effective valuation source, not just the provider
+// that originally supplied a now-cached price. Live/delayed share provenance.
+export function sourceName(quotes: Quote[]): string {
+  const counts = new Map<string, number>();
+  for (const quote of quotes) {
+    const source = quoteSource(quote);
+    counts.set(source, (counts.get(source) ?? 0) + 1);
+  }
+  const sources = [...counts.keys()].sort();
+  if (sources.length < 2) return sources[0] ?? 'PRICE FEED';
+  return `Mixed (${sources.map(source => `${source}: ${counts.get(source)}`).join(', ')})`;
 }
 
 export function detectPriceSourceTransition(beforeValue: number, afterValue: number, beforeQuotes: Quote[], afterQuotes: Quote[], now = Date.now(), threshold = MATERIAL_DELTA): PriceSourceTransition | undefined {
@@ -63,10 +76,18 @@ export function detectPriceSourceTransition(beforeValue: number, afterValue: num
   const denominator = Math.max(Math.abs(beforeValue), 0.01);
   const delta = afterValue - beforeValue;
   const deltaPercent = delta / denominator;
-  const from = sourceName(beforeQuotes);
-  const to = sourceName(afterQuotes);
-  const provenanceChanged = from !== to || beforeQuotes.some((quote) => quote.status === 'cached' || quote.status === 'mock');
-  if (!provenanceChanged || Math.abs(deltaPercent) <= threshold) return undefined;
+  const previous = new Map(beforeQuotes.map(quote => [key(quote), quoteSource(quote)]));
+  // Compare the same assets: adding/removing a holding is not a source change.
+  const changed = afterQuotes.filter(quote => previous.has(key(quote)) && previous.get(key(quote)) !== quoteSource(quote));
+  if (!changed.length || Math.abs(deltaPercent) <= threshold) return undefined;
+  let from = sourceName(beforeQuotes);
+  let to = sourceName(afterQuotes);
+  if (from === to) {
+    // Equal mixed counts can hide a real per-asset cache/provider swap.
+    const ordered = [...changed].sort((a, b) => key(a).localeCompare(key(b)));
+    from += ` [${ordered.map(quote => `${key(quote)}: ${previous.get(key(quote))}`).join(', ')}]`;
+    to += ` [${ordered.map(quote => `${key(quote)}: ${quoteSource(quote)}`).join(', ')}]`;
+  }
   return { from, to, delta, deltaPercent: deltaPercent * 100, detectedAt: now };
 }
 
@@ -74,9 +95,16 @@ export function detectLedgerPriceSourceTransition(snapshot: LedgerAccountState, 
   return detectPriceSourceTransition(calculateLedgerPortfolio(snapshot, before).totalValue, calculateLedgerPortfolio(snapshot, after).totalValue, before, after, now);
 }
 
-export function feedLabel(feed: FeedStatus): string {
+export function feedLabel(feed: FeedStatus, quotes?: Quote[]): string {
   const provider = providerLabel(feed.provider);
   if (feed.state === 'updating') return 'UPDATING';
+  if (quotes?.length && !['idle', 'unavailable', 'demo'].includes(feed.state)) {
+    const source = sourceName(quotes);
+    if (source.startsWith('Mixed (')) return `${source.toUpperCase()} / ${feed.state.replaceAll('_', ' ').toUpperCase()}`;
+    if (source === 'Cache') return feed.state === 'offline' ? 'OFFLINE / CACHED' : 'CACHE / STALE';
+    if (source === 'Demo') return 'DEMO / NOT LIVE';
+    if (feed.state === 'live' || feed.state === 'delayed' || feed.state === 'market_closed') return `${source} / ${feed.state.replaceAll('_', ' ').toUpperCase()}`;
+  }
   if (feed.state === 'market_closed') return `${provider} / MARKET CLOSED`;
   if (feed.state === 'live') return `${provider} / LIVE`;
   if (feed.state === 'delayed') return `${provider} / DELAYED`;
@@ -96,7 +124,7 @@ export function valuationLabel(feed: FeedStatus, missing: number): string {
 }
 
 export function feedTooltip(feed: FeedStatus, quotes: Quote[]): string {
-  const lines = [feedLabel(feed)];
+  const lines = [feedLabel(feed, quotes)];
   const newest = quotes.length ? Math.max(...quotes.map((quote) => quote.timestamp)) : 0;
   if (newest) lines.push(`Newest market quote: ${new Date(newest).toLocaleTimeString()}`);
   if (feed.lastQuoteReceivedAt) lines.push(`Last quote received: ${new Date(feed.lastQuoteReceivedAt).toLocaleTimeString()}`);

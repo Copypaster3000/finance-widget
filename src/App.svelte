@@ -157,7 +157,7 @@
         quotes = nextQuotes;
         await saveQuotes(quotes); clockNow = checkedAt;
         if (config.refreshMode === '15s' || config.refreshMode === '15m') { hourlyHistory = recordRecentPortfolio(hourlyHistory, nextValue, checkedAt); await saveHourlyHistory(hourlyHistory); }
-        feed = { ...feed, provider: result.quotes[0]?.provider ?? provider.name, lastQuoteReceivedAt: checkedAt, transition: transition ?? feed.transition };
+        feed = { ...feed, provider: result.quotes[0]?.provider ?? provider.name, lastQuoteReceivedAt: checkedAt, transition };
       }
       const hasStocks = holdings.some((holding) => holding.type === 'stock');
       const hasCrypto = holdings.some((holding) => holding.type === 'crypto');

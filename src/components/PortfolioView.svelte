@@ -83,7 +83,7 @@
 
   <footer class="status-deck">
     <div class="status-left">
-      <span class:warning={feedWarning} class="signal" title={feedTooltip(feed, quotes)}><i></i>{feedLabel(feed)}</span>
+      <span class:warning={feedWarning} class="signal" title={feedTooltip(feed, quotes)}><i></i>{feedLabel(feed, quotes)}</span>
     </div>
     <div class="updated"><span>CHECKED</span><strong>{feed.lastCheckedAt ? syncTime(feed.lastCheckedAt) : 'NOT YET'}</strong></div>
   </footer>
