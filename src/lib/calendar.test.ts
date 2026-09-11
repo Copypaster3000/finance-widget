@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { calendarDateAsLocalDate, calendarDateInTimeZone, isCalendarDate, shiftCalendarDate } from './calendar';
+import { calendarDateAsLocalDate, calendarDateFromTimestamp, isCalendarDate, shiftCalendarDate } from './calendar';
 
 describe('portfolio calendar dates', () => {
   it('keeps a user-entered calendar date independent of UTC parsing', () => {
@@ -9,14 +9,8 @@ describe('portfolio calendar dates', () => {
     expect(date.getDate()).toBe(29);
   });
 
-  it('uses the Pacific calendar day across the UTC boundary', () => {
-    expect(calendarDateInTimeZone('2026-08-30T02:30:00.000Z', 'America/Los_Angeles')).toBe('2026-08-29');
-    expect(calendarDateInTimeZone('2026-08-30T08:30:00.000Z', 'America/Los_Angeles')).toBe('2026-08-30');
-  });
-
-  it('keeps a history endpoint on the same Pacific day as its ledger date', () => {
-    const ledgerDate = '2026-08-29';
-    expect(calendarDateInTimeZone('2026-08-30T02:30:00.000Z', 'America/Los_Angeles')).toBe(ledgerDate);
+  it('round-trips the active local date and timestamp helpers', () => {
+    expect(calendarDateFromTimestamp(new Date(2020, 0, 2, 12).toISOString())).toBe('2020-01-02');
   });
 
   it('shifts calendar dates without timezone drift', () => {

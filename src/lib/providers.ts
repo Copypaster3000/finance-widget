@@ -1,70 +1,11 @@
 import { fetch } from '@tauri-apps/plugin-http';
 import { invoke } from '@tauri-apps/api/core';
-import { MOCK_QUOTES } from './defaults';
-import { datesBetween } from './history';
 import { FUTURE_TOLERANCE } from './quotePolicy';
 import { MAX_PRICE } from './decimal';
 import type { HistoricalPricePoint, HistoricalResult, HistoricalSeries, Holding, HourlyPricePoint, HourlyResult, HourlySeries, PriceProvider, Quote, QuoteResult } from './types';
 
 function uniqueHoldings(holdings: Holding[]): Holding[] {
   return [...new Map(holdings.map((holding) => [`${holding.type}:${holding.symbol.toUpperCase()}`, holding])).values()];
-}
-
-export class MockPriceProvider implements PriceProvider {
-  readonly id = 'mock';
-  readonly name = 'Demo feed';
-
-  async getQuotes(holdings: Holding[]): Promise<QuoteResult> {
-    const now = Date.now();
-    const quoteMap = new Map(MOCK_QUOTES.map((quote) => [`${quote.assetType}:${quote.symbol}`, quote]));
-    const quotes = uniqueHoldings(holdings).map((holding, index) => {
-      const existing = quoteMap.get(`${holding.type}:${holding.symbol.toUpperCase()}`);
-      if (existing) return { ...existing, timestamp: now };
-      return { symbol: holding.symbol.toUpperCase(), assetType: holding.type, price: 100 + index * 27.42, currency: 'USD', timestamp: now, provider: this.name, status: 'mock' as const };
-    });
-    await new Promise((resolve) => setTimeout(resolve, 380));
-    return { quotes, errors: [] };
-  }
-
-  async getHistoricalPrices(holdings: Holding[], startDate: string, endDate: string): Promise<HistoricalResult> {
-    const quoteMap = new Map(MOCK_QUOTES.map((quote) => [`${quote.assetType}:${quote.symbol}`, quote.price]));
-    const series = uniqueHoldings(holdings).map((holding) => {
-      const symbol = holding.symbol.toUpperCase();
-      const base = quoteMap.get(`${holding.type}:${symbol}`) ?? 100;
-      const seed = [...symbol].reduce((total, character) => total + character.charCodeAt(0), 0);
-      const dates = datesBetween(startDate, endDate).filter((date) => holding.type === 'crypto' || ![0, 6].includes(new Date(`${date}T00:00:00Z`).getUTCDay()));
-      const points = dates.map((date, index) => {
-        const distance = Math.max(1, dates.length - index);
-        const drift = 1 - distance * 0.0045;
-        const wave = Math.sin((index + seed) * 0.72) * 0.016;
-        return { date, price: Math.max(0.01, base * (drift + wave)) };
-      });
-      return { symbol, assetType: holding.type, points };
-    });
-    await new Promise((resolve) => setTimeout(resolve, 220));
-    return { series, errors: [] };
-  }
-
-  async getHourlyPrices(holdings: Holding[], startTime: string, endTime: string): Promise<HourlyResult> {
-    const start = Date.parse(startTime);
-    const end = Date.parse(endTime);
-    const quoteMap = new Map(MOCK_QUOTES.map((quote) => [`${quote.assetType}:${quote.symbol}`, quote.price]));
-    const series = uniqueHoldings(holdings).map((holding) => {
-      const symbol = holding.symbol.toUpperCase();
-      const base = quoteMap.get(`${holding.type}:${symbol}`) ?? 100;
-      const points: HourlyPricePoint[] = [];
-      for (let timestamp = start, index = 0; timestamp <= end; timestamp += 3_600_000, index += 1) {
-        const hour = new Date(timestamp).getUTCHours();
-        const day = new Date(timestamp).getUTCDay();
-        const marketOpen = holding.type === 'crypto' || (![0, 6].includes(day) && hour >= 14 && hour <= 20);
-        if (marketOpen) points.push({ timestamp: new Date(timestamp).toISOString(), price: Math.max(0.01, base * (0.96 + index * 0.0004 + Math.sin(index * 0.3) * 0.006)) });
-      }
-      return { symbol, assetType: holding.type, points };
-    });
-    return { series, errors: [] };
-  }
-
-  supportsStreaming(): boolean { return false; }
 }
 
 type YahooChartResult = {

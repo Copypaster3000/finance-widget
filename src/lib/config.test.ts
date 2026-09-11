@@ -1,25 +1,34 @@
 import { describe, expect, it } from 'vitest';
-import { addHolding, deserializeConfig, editHolding, normalizeAppearanceScale, normalizeHistoryRange, normalizeRefreshMode, normalizeStockSession, removeHolding, serializeConfig } from './config';
+import { normalizeConfig, normalizeAppearanceScale, normalizeHistoryRange, normalizeRefreshMode, normalizeStockSession } from './config';
 import { DEFAULT_CONFIG } from './defaults';
 
 describe('configuration', () => {
+  it.each(['2020-02-30', '2020-13-01', 'not-a-date', '', 42])('rejects malformed stored calendar date %s', (historyStartDate) => {
+    expect(() => normalizeConfig({ schemaVersion: 10, historyStartDate })).toThrow('INTEGRITY_ERROR');
+  });
+  it.each([{}, [], 42, { schemaVersion: 0 }])('rejects malformed configuration %j', value => {
+    expect(() => normalizeConfig(value)).toThrow('INTEGRITY_ERROR');
+  });
+  it('defaults missing configuration and accepts a real leap day', () => {
+    expect(normalizeConfig(undefined)).toEqual(DEFAULT_CONFIG);
+    expect(normalizeConfig({ schemaVersion: 1, historyStartDate: '2020-02-29' }).historyStartDate).toBe('2020-02-29');
+  });
   it('serializes and deserializes configuration', () => {
-    const encoded = serializeConfig(DEFAULT_CONFIG);
-    expect(deserializeConfig(encoded)).toEqual(DEFAULT_CONFIG);
+    expect(normalizeConfig(JSON.parse(JSON.stringify(DEFAULT_CONFIG)))).toEqual(DEFAULT_CONFIG);
   });
 
   it('persists the optional history graph preference', () => {
     const config = structuredClone(DEFAULT_CONFIG);
     config.appearance.showHistory = false;
-    expect(deserializeConfig(serializeConfig(config)).appearance.showHistory).toBe(false);
+    expect(normalizeConfig(JSON.parse(JSON.stringify(config))).appearance.showHistory).toBe(false);
   });
 
   it('rejects unsupported schemas', () => {
-    expect(() => deserializeConfig('{"schemaVersion":99}')).toThrow(/schema/i);
+    expect(() => normalizeConfig(JSON.parse('{"schemaVersion":99}'))).toThrow(/schema/i);
   });
 
   it('migrates schema 1 and adds the default history start date', () => {
-    const migrated = deserializeConfig('{"schemaVersion":1,"holdings":[]}');
+    const migrated = normalizeConfig(JSON.parse('{"schemaVersion":1,"holdings":[]}'));
     expect(migrated.schemaVersion).toBe(10);
     expect(migrated.historyStartDate).toBe(DEFAULT_CONFIG.historyStartDate);
     expect(migrated.historyStartMode).toBe('auto');
@@ -32,7 +41,7 @@ describe('configuration', () => {
   });
 
   it('removes legacy provider credentials while migrating saved configuration', () => {
-    const migrated = deserializeConfig('{"schemaVersion":2,"holdings":[],"provider":"twelveData","twelveDataApiKey":"legacy-key","fmpApiKey":"legacy-key"}');
+    const migrated = normalizeConfig(JSON.parse('{"schemaVersion":2,"holdings":[],"provider":"twelveData","twelveDataApiKey":"legacy-key","fmpApiKey":"legacy-key"}'));
     expect(migrated.schemaVersion).toBe(10);
     expect(migrated).not.toHaveProperty('provider');
     expect(migrated).not.toHaveProperty('twelveDataApiKey');
@@ -43,12 +52,12 @@ describe('configuration', () => {
     expect(DEFAULT_CONFIG.appearance).toMatchObject({ showCash: false, showDebt: false });
     const config = structuredClone(DEFAULT_CONFIG);
     config.appearance.showCash = true;
-    expect(deserializeConfig(serializeConfig(config)).appearance).toMatchObject({ showCash: true, showDebt: false });
+    expect(normalizeConfig(JSON.parse(JSON.stringify(config))).appearance).toMatchObject({ showCash: true, showDebt: false });
   });
 
   it('persists an explicitly manual history start mode', () => {
     const config = { ...structuredClone(DEFAULT_CONFIG), historyStartMode: 'manual' as const, historyStartDate: '2026-08-01' };
-    expect(deserializeConfig(serializeConfig(config))).toMatchObject({ historyStartMode: 'manual', historyStartDate: '2026-08-01' });
+    expect(normalizeConfig(JSON.parse(JSON.stringify(config)))).toMatchObject({ historyStartMode: 'manual', historyStartDate: '2026-08-01' });
   });
 
   it('normalizes removed refresh modes to supported choices', () => {
@@ -64,7 +73,7 @@ describe('configuration', () => {
     expect(normalizeStockSession('unexpected')).toBe('extended');
     const config = structuredClone(DEFAULT_CONFIG);
     config.stockSession = 'regular';
-    expect(deserializeConfig(serializeConfig(config)).stockSession).toBe('regular');
+    expect(normalizeConfig(JSON.parse(JSON.stringify(config))).stockSession).toBe('regular');
   });
 
   it('bounds and quantizes the responsive text scale', () => {
@@ -80,15 +89,7 @@ describe('configuration', () => {
     expect(normalizeHistoryRange('unexpected')).toBe('all');
     const config = structuredClone(DEFAULT_CONFIG);
     config.appearance.historyRange = '1w';
-    expect(deserializeConfig(serializeConfig(config)).appearance.historyRange).toBe('1w');
+    expect(normalizeConfig(JSON.parse(JSON.stringify(config))).appearance.historyRange).toBe('1w');
   });
 
-  it('adds, edits and removes holdings immutably', () => {
-    const added = addHolding([], { id: 'x', symbol: 'MSFT', type: 'stock', quantity: 1 });
-    const edited = editHolding(added, 'x', { quantity: 2.5 });
-    const removed = removeHolding(edited, 'x');
-    expect(added[0].quantity).toBe(1);
-    expect(edited[0].quantity).toBe(2.5);
-    expect(removed).toEqual([]);
-  });
 });

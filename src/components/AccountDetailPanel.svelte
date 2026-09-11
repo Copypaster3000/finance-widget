@@ -23,7 +23,6 @@
   type Action = 'cash_opening' | 'cash_deposit' | 'cash_withdrawal' | 'cash_set' | 'cash_clear' | 'debt_opening' | 'debt_payment' | 'debt_set' | 'debt_clear';
   let action: Action | undefined;
   let editing: LedgerEvent | undefined;
-  let editingActivity: AccountActivity | undefined;
   let date = today();
   let amount: string | number = '';
   let paymentSource: 'external' | 'cash' = 'external';
@@ -35,7 +34,7 @@
 
   $: relevant = activities.filter((activity) => activity.account === kind).sort((a, b) => b.date.localeCompare(a.date) || b.sequence - a.sequence);
   $: directOpening = events.find((event) => event.eventType === `${kind}_opening`);
-  $: proposed = buildEvent(action, editing, editingActivity, date, amount, paymentSource, events, balance);
+  $: proposed = buildEvent(action, editing, date, amount, paymentSource, events);
   $: previewResult = proposed ? previewEvent(proposed) : undefined;
   $: consequence = previewResult?.preview;
   $: targetBalance = kind === 'cash' ? consequence?.resultingCash : consequence?.resultingDebt;
@@ -55,7 +54,6 @@
   function start(next: Action, event?: LedgerEvent, activity?: AccountActivity) {
     action = next;
     editing = event;
-    editingActivity = activity;
     date = event?.date ?? today();
     paymentSource = event?.eventType === 'debt_payment' ? event.source : 'external';
     if (next === 'cash_set' || next === 'debt_set') amount = activity?.balanceAfter ?? balance;
@@ -74,8 +72,8 @@
     const event = events.find((candidate) => candidate.id === activity.sourceEventId);
     if (event) startFromEvent(event);
   }
-  function closeForm() { action = undefined; editing = undefined; editingActivity = undefined; error = ''; deleteTarget = undefined; deleteError = undefined; }
-  function buildEvent(currentAction: Action | undefined, currentEditing: LedgerEvent | undefined, currentActivity: AccountActivity | undefined, currentDate: string, currentAmount: string | number, source: 'external' | 'cash', currentEvents: LedgerEvent[], currentBalance: number): LedgerEvent | undefined {
+  function closeForm() { action = undefined; editing = undefined; error = ''; deleteTarget = undefined; deleteError = undefined; }
+  function buildEvent(currentAction: Action | undefined, currentEditing: LedgerEvent | undefined, currentDate: string, currentAmount: string | number, source: 'external' | 'cash', currentEvents: LedgerEvent[]): LedgerEvent | undefined {
     if (!currentAction || !currentDate) return undefined;
     const isSet = currentAction === 'cash_set' || currentAction === 'cash_clear' || currentAction === 'debt_set' || currentAction === 'debt_clear';
     const normalized = normalizedMoney(currentAmount);
@@ -116,7 +114,7 @@
 
   async function save() {
     if (!action || !date || date > today()) { error = 'ENTER A VALID DATE'; return; }
-    const preview = buildEvent(action, editing, editingActivity, date, amount, paymentSource, events, balance);
+    const preview = buildEvent(action, editing, date, amount, paymentSource, events);
     if (!preview) { error = action.endsWith('clear') ? 'ACCOUNT IS ALREADY CLEAR' : 'ENTER A VALID POSITIVE AMOUNT'; return; }
     const now = new Date().toISOString();
     const event = { ...preview, id: editing?.id ?? crypto.randomUUID(), createdAt: editing?.createdAt ?? now, updatedAt: now } as LedgerEvent;

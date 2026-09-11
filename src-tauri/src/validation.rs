@@ -2,6 +2,19 @@
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
 
+#[cfg(test)]
+mod parity_tests {
+    use super::*;
+
+    #[test]
+    fn shared_frontend_native_cases() {
+        let cases: Value = serde_json::from_str(include_str!("../../tests/fixtures/validation-parity.json")).unwrap();
+        for case in cases.as_array().unwrap() {
+            assert_eq!(validate(case["data"].as_object().unwrap()).is_ok(), case["nativeAccepted"].as_bool().unwrap(), "{}", case["name"]);
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum Invalid {
     Corrupt(String),

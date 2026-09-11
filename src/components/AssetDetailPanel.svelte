@@ -43,10 +43,9 @@
   $: assetEvents = events.filter((event): event is BuyEvent | SellEvent => (event.eventType === 'buy' || event.eventType === 'sell') && event.assetId === asset.id).sort((a, b) => b.date.localeCompare(a.date) || b.sequence - a.sequence);
   $: marketValue = quote ? position.quantity * quote.price : undefined;
   $: unrealized = marketValue !== undefined && position.remainingCostBasis !== undefined ? marketValue - position.remainingCostBasis : undefined;
-  $: previewTotal = mode === 'unit' && Number(quantity) > 0 && Number(unitPrice) > 0
-    ? Number(quantity) * Number(unitPrice) + (screen === 'buy' ? Number(fees || 0) : -Number(fees || 0))
-    : Number(totalAmount);
-  $: previewResult = transactionPreview(screen, editing, date, quantity, mode, unitPrice, totalAmount, fees, affectsCashDebt, events);
+  $: draftEvent = transactionDraft(screen, editing, date, quantity, mode, unitPrice, totalAmount, fees, affectsCashDebt, events);
+  $: previewTotal = draftEvent?.totalAmount;
+  $: previewResult = draftEvent ? previewEvent(draftEvent) : undefined;
   $: consequence = previewResult?.preview;
   $: saveBlockers = blockingEvents(saveError);
   $: removableSaveBlockers = saveBlockers.filter(isNegativeAccountAdjustment);
@@ -71,17 +70,16 @@
     }
   }
   function cancelForm() { screen = 'detail'; resetForm(); }
-  function transactionPreview(currentScreen: Screen, currentEditing: LedgerEvent | undefined, currentDate: string, currentQuantity: string | number, currentMode: 'unit' | 'total', currentUnitPrice: string | number, currentTotalAmount: string | number, currentFees: string | number, currentAffectsCashDebt: boolean, currentEvents: LedgerEvent[]): LedgerEventPreviewResult | undefined {
+  function transactionDraft(currentScreen: Screen, currentEditing: LedgerEvent | undefined, currentDate: string, currentQuantity: string | number, currentMode: 'unit' | 'total', currentUnitPrice: string | number, currentTotalAmount: string | number, currentFees: string | number, currentAffectsCashDebt: boolean, currentEvents: LedgerEvent[]): BuyEvent | SellEvent | undefined {
     if ((currentScreen !== 'buy' && currentScreen !== 'sell') || !hasDecimalInput(currentQuantity)) return undefined;
     const authoritative = currentMode === 'unit' ? currentUnitPrice : currentTotalAmount;
     if (!hasDecimalInput(authoritative)) return undefined;
     const result = buildTradeEvent({
       id: currentEditing?.id ?? '__preview__', side: currentScreen, assetId: asset.id, date: currentDate,
       sequence: currentEditing?.sequence ?? nextSequence(currentEvents, currentDate), quantity: currentQuantity, mode: currentMode, unitPrice: currentUnitPrice, totalAmount: currentTotalAmount, fees: currentFees, affectsCashDebt: currentAffectsCashDebt,
-      priceSource: currentEditing && 'priceSource' in currentEditing ? currentEditing.priceSource : undefined,
       createdAt: currentEditing?.createdAt ?? 'preview'
     }, today(), 'preview');
-    return result.event ? previewEvent(result.event) : undefined;
+    return result.event;
   }
 
   async function finishTrade(resolution?: TransactionPriceResolution) {
@@ -196,7 +194,7 @@
         {#if effectiveUnitPrice(totalAmount, quantity)}<p class="form-hint">EFFECTIVE UNIT {money.format(Number(effectiveUnitPrice(totalAmount, quantity)))}</p>{/if}
       {/if}
       <label class="account-impact-toggle"><input type="checkbox" bind:checked={affectsCashDebt}/><span class="account-impact-check" aria-hidden="true">{#if affectsCashDebt}<Icon name="check" size={10}/>{/if}</span><span class="account-impact-copy"><b>{screen === 'buy' ? 'USE TRACKED CASH / DEBT' : 'APPLY PROCEEDS TO CASH / DEBT'}</b><i>{affectsCashDebt ? (screen === 'buy' ? 'Cash first, then Margin Debt.' : 'Debt first, then remaining Cash.') : 'This transaction changes holdings and gains only.'}</i></span></label>
-      {#if Number.isFinite(previewTotal) && previewTotal > 0}<div class="calculated-total"><span>{screen === 'buy' ? 'TOTAL PAID' : 'NET PROCEEDS'}</span><strong>{money.format(previewTotal)}</strong></div>{/if}
+      {#if previewTotal !== undefined}<div class="calculated-total"><span>{screen === 'buy' ? 'TOTAL PAID' : 'NET PROCEEDS'}</span><strong>{money.format(Number(previewTotal))}</strong></div>{/if}
       {#if consequence}<div class="consequence-preview"><span>{screen === 'buy' ? 'FUNDING' : 'PROCEEDS'}</span>
         {#if consequence.cashDelta === 0 && consequence.debtDelta === 0}<p><i>NO CASH / DEBT CHANGE</i></p>{/if}
         {#if screen === 'buy' && consequence.cashDelta < 0}<p><i>CASH</i><b>{signedMoney(consequence.cashDelta)}</b></p>{/if}

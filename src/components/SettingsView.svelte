@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { normalizeAppearanceScale } from '../lib/config';
   import Icon from './Icon.svelte';
   import { version } from '../../package.json';
   import { localCalendarDate } from '../lib/calendar';
@@ -30,7 +31,7 @@
     '15s': 'Checks every 15 seconds. This is polling, not a streaming market feed.'
   };
 
-  function adjustTextScale(delta: number) { draft.appearance.scale = Math.round(Math.min(1.4, Math.max(0.8, draft.appearance.scale + delta)) * 10) / 10; }
+  function adjustTextScale(delta: number) { draft.appearance.scale = normalizeAppearanceScale(draft.appearance.scale + delta); }
   async function apply() {
     if (saving) return;
     if (!isIsoDate(draft.historyStartDate) || draft.historyStartDate > localCalendarDate()) { saveError = 'Enter a valid history start date that is not in the future.'; return; }

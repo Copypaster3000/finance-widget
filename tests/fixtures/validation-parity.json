@@ -1,0 +1,388 @@
+[
+  {
+    "name": "valid external buy",
+    "frontendAccepted": true,
+    "nativeAccepted": true,
+    "note": "",
+    "data": {
+      "portfolio-ledger-v1": {
+        "schemaVersion": 2,
+        "assets": [
+          {
+            "id": "synthetic",
+            "symbol": "SYNTH",
+            "type": "stock",
+            "createdAt": "2020-01-01T00:00:00Z"
+          }
+        ],
+        "events": [
+          {
+            "id": "one",
+            "eventType": "buy",
+            "assetId": "synthetic",
+            "date": "2020-01-02",
+            "sequence": 1,
+            "quantity": "1",
+            "unitPrice": "10",
+            "fees": "0",
+            "totalAmount": "10",
+            "priceSource": "manual_total",
+            "affectsCashDebt": false,
+            "createdAt": "2020-01-01T00:00:00Z",
+            "updatedAt": "2020-01-01T00:00:00Z"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "eight decimal quantity",
+    "frontendAccepted": true,
+    "nativeAccepted": true,
+    "note": "",
+    "data": {
+      "portfolio-ledger-v1": {
+        "schemaVersion": 2,
+        "assets": [
+          {
+            "id": "synthetic",
+            "symbol": "SYNTH",
+            "type": "stock",
+            "createdAt": "2020-01-01T00:00:00Z"
+          }
+        ],
+        "events": [
+          {
+            "id": "one",
+            "eventType": "buy",
+            "assetId": "synthetic",
+            "date": "2020-01-02",
+            "sequence": 1,
+            "quantity": "0.00000001",
+            "unitPrice": "10",
+            "fees": "0",
+            "totalAmount": "10",
+            "priceSource": "manual_total",
+            "affectsCashDebt": false,
+            "createdAt": "2020-01-01T00:00:00Z",
+            "updatedAt": "2020-01-01T00:00:00Z"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "negative quantity",
+    "frontendAccepted": false,
+    "nativeAccepted": false,
+    "note": "",
+    "data": {
+      "portfolio-ledger-v1": {
+        "schemaVersion": 2,
+        "assets": [
+          {
+            "id": "synthetic",
+            "symbol": "SYNTH",
+            "type": "stock",
+            "createdAt": "2020-01-01T00:00:00Z"
+          }
+        ],
+        "events": [
+          {
+            "id": "one",
+            "eventType": "buy",
+            "assetId": "synthetic",
+            "date": "2020-01-02",
+            "sequence": 1,
+            "quantity": "-1",
+            "unitPrice": "10",
+            "fees": "0",
+            "totalAmount": "10",
+            "priceSource": "manual_total",
+            "affectsCashDebt": false,
+            "createdAt": "2020-01-01T00:00:00Z",
+            "updatedAt": "2020-01-01T00:00:00Z"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "pre-1900 date",
+    "frontendAccepted": false,
+    "nativeAccepted": false,
+    "note": "",
+    "data": {
+      "portfolio-ledger-v1": {
+        "schemaVersion": 2,
+        "assets": [
+          {
+            "id": "synthetic",
+            "symbol": "SYNTH",
+            "type": "stock",
+            "createdAt": "2020-01-01T00:00:00Z"
+          }
+        ],
+        "events": [
+          {
+            "id": "one",
+            "eventType": "buy",
+            "assetId": "synthetic",
+            "date": "1899-01-01",
+            "sequence": 1,
+            "quantity": "1",
+            "unitPrice": "10",
+            "fees": "0",
+            "totalAmount": "10",
+            "priceSource": "manual_total",
+            "affectsCashDebt": false,
+            "createdAt": "2020-01-01T00:00:00Z",
+            "updatedAt": "2020-01-01T00:00:00Z"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "impossible date",
+    "frontendAccepted": false,
+    "nativeAccepted": false,
+    "note": "",
+    "data": {
+      "portfolio-ledger-v1": {
+        "schemaVersion": 2,
+        "assets": [
+          {
+            "id": "synthetic",
+            "symbol": "SYNTH",
+            "type": "stock",
+            "createdAt": "2020-01-01T00:00:00Z"
+          }
+        ],
+        "events": [
+          {
+            "id": "one",
+            "eventType": "buy",
+            "assetId": "synthetic",
+            "date": "2020-02-30",
+            "sequence": 1,
+            "quantity": "1",
+            "unitPrice": "10",
+            "fees": "0",
+            "totalAmount": "10",
+            "priceSource": "manual_total",
+            "affectsCashDebt": false,
+            "createdAt": "2020-01-01T00:00:00Z",
+            "updatedAt": "2020-01-01T00:00:00Z"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "unknown basis zero fees",
+    "frontendAccepted": true,
+    "nativeAccepted": true,
+    "note": "",
+    "data": {
+      "portfolio-ledger-v1": {
+        "schemaVersion": 2,
+        "assets": [
+          {
+            "id": "synthetic",
+            "symbol": "SYNTH",
+            "type": "stock",
+            "createdAt": "2020-01-01T00:00:00Z"
+          }
+        ],
+        "events": [
+          {
+            "id": "one",
+            "eventType": "buy",
+            "assetId": "synthetic",
+            "date": "2020-01-02",
+            "sequence": 1,
+            "quantity": "1",
+            "fees": "0",
+            "priceSource": "legacy_unknown",
+            "affectsCashDebt": false,
+            "createdAt": "2020-01-01T00:00:00Z",
+            "updatedAt": "2020-01-01T00:00:00Z"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "unknown basis nonzero fees",
+    "frontendAccepted": false,
+    "nativeAccepted": false,
+    "note": "",
+    "data": {
+      "portfolio-ledger-v1": {
+        "schemaVersion": 2,
+        "assets": [
+          {
+            "id": "synthetic",
+            "symbol": "SYNTH",
+            "type": "stock",
+            "createdAt": "2020-01-01T00:00:00Z"
+          }
+        ],
+        "events": [
+          {
+            "id": "one",
+            "eventType": "buy",
+            "assetId": "synthetic",
+            "date": "2020-01-02",
+            "sequence": 1,
+            "quantity": "1",
+            "fees": "0.01",
+            "priceSource": "legacy_unknown",
+            "affectsCashDebt": false,
+            "createdAt": "2020-01-01T00:00:00Z",
+            "updatedAt": "2020-01-01T00:00:00Z"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "excess quantity precision",
+    "frontendAccepted": false,
+    "nativeAccepted": false,
+    "note": "",
+    "data": {
+      "portfolio-ledger-v1": {
+        "schemaVersion": 2,
+        "assets": [
+          {
+            "id": "synthetic",
+            "symbol": "SYNTH",
+            "type": "stock",
+            "createdAt": "2020-01-01T00:00:00Z"
+          }
+        ],
+        "events": [
+          {
+            "id": "one",
+            "eventType": "buy",
+            "assetId": "synthetic",
+            "date": "2020-01-02",
+            "sequence": 1,
+            "quantity": "0.000000001",
+            "unitPrice": "10",
+            "fees": "0",
+            "totalAmount": "10",
+            "priceSource": "manual_total",
+            "affectsCashDebt": false,
+            "createdAt": "2020-01-01T00:00:00Z",
+            "updatedAt": "2020-01-01T00:00:00Z"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "position limit exceeded then reduced",
+    "frontendAccepted": true,
+    "nativeAccepted": false,
+    "note": "Deferred: frontend final snapshot vs native per-event aggregate position limit.",
+    "data": {
+      "portfolio-ledger-v1": {
+        "schemaVersion": 2,
+        "assets": [
+          {
+            "id": "synthetic",
+            "symbol": "SYNTH",
+            "type": "stock",
+            "createdAt": "2020-01-01T00:00:00Z"
+          }
+        ],
+        "events": [
+          {
+            "id": "one",
+            "eventType": "buy",
+            "assetId": "synthetic",
+            "date": "2020-01-02",
+            "sequence": 1,
+            "quantity": "1000000",
+            "unitPrice": "1",
+            "fees": "0",
+            "totalAmount": "1000000",
+            "priceSource": "manual_total",
+            "affectsCashDebt": false,
+            "createdAt": "2020-01-01T00:00:00Z",
+            "updatedAt": "2020-01-01T00:00:00Z"
+          },
+          {
+            "id": "two",
+            "eventType": "buy",
+            "assetId": "synthetic",
+            "date": "2020-01-02",
+            "sequence": 2,
+            "quantity": "1",
+            "unitPrice": "1",
+            "fees": "0",
+            "totalAmount": "1",
+            "priceSource": "manual_total",
+            "affectsCashDebt": false,
+            "createdAt": "2020-01-01T00:00:00Z",
+            "updatedAt": "2020-01-01T00:00:00Z"
+          },
+          {
+            "id": "three",
+            "eventType": "sell",
+            "assetId": "synthetic",
+            "date": "2020-01-02",
+            "sequence": 3,
+            "quantity": "1",
+            "unitPrice": "1",
+            "fees": "0",
+            "totalAmount": "1",
+            "priceSource": "manual_total",
+            "affectsCashDebt": false,
+            "createdAt": "2020-01-01T00:00:00Z",
+            "updatedAt": "2020-01-01T00:00:00Z"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "shorthand decimal in raw stored record",
+    "frontendAccepted": true,
+    "nativeAccepted": false,
+    "note": "Intentional input convenience: form builder emits canonical leading-zero strings; native persisted records require canonical syntax.",
+    "data": {
+      "portfolio-ledger-v1": {
+        "schemaVersion": 2,
+        "assets": [
+          {
+            "id": "synthetic",
+            "symbol": "SYNTH",
+            "type": "stock",
+            "createdAt": "2020-01-01T00:00:00Z"
+          }
+        ],
+        "events": [
+          {
+            "id": "one",
+            "eventType": "buy",
+            "assetId": "synthetic",
+            "date": "2020-01-02",
+            "sequence": 1,
+            "quantity": ".5",
+            "unitPrice": "10",
+            "fees": "0",
+            "totalAmount": "10",
+            "priceSource": "manual_total",
+            "affectsCashDebt": false,
+            "createdAt": "2020-01-01T00:00:00Z",
+            "updatedAt": "2020-01-01T00:00:00Z"
+          }
+        ]
+      }
+    }
+  }
+]

@@ -1,12 +1,10 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { AppConfig, HistoricalCache, Holding, LedgerPriceCache, PortfolioHourlyCache, PortfolioLedger, Quote } from './types';
-import { DEFAULT_CONFIG } from './defaults';
 import { EMPTY_HOURLY_CACHE, sanitizeHourlyCache } from './hourly';
-import { normalizeAppearanceScale, normalizeHistoryRange, normalizeRefreshMode, normalizeStockSession } from './config';
+import { normalizeConfig } from './config';
 import { migrateLegacyHoldings, sanitizeLedger } from './ledger';
 import { EMPTY_LEDGER_PRICE_CACHE, sanitizeLedgerPriceCache } from './ledgerHistory';
 import { sanitizeQuotes } from './quotePolicy';
-import { isIsoDate } from './history';
 
 export interface LoadMetadata { state: 'firstRunEmpty' | 'portfolioLoaded' | 'portfolioRecovered'; recoveryReason?: string; backupModifiedAt?: number }
 interface NativeLoad { data: Record<string, unknown>; metadata: LoadMetadata }
@@ -25,36 +23,6 @@ export class StorageUnavailableError extends Error {
     super(detail);
     this.name = 'StorageUnavailableError';
   }
-}
-
-function mergeConfig(value: Partial<AppConfig> | null | undefined): AppConfig {
-  if (value != null && (typeof value !== 'object' || !Number.isInteger(value.schemaVersion) || Number(value.schemaVersion) < 1)) throw new StorageUnavailableError('INTEGRITY_ERROR: Invalid configuration schema.');
-  if (value && Number(value.schemaVersion) > 10) throw new StorageUnavailableError('UNSUPPORTED_SCHEMA: Update Finance Widget to open this configuration.');
-  if (value?.historyStartDate !== undefined && !isIsoDate(value.historyStartDate)) throw new StorageUnavailableError('INTEGRITY_ERROR: Invalid history start date.');
-  const current = { ...value } as Partial<AppConfig> & Record<string, unknown>;
-  delete current.provider;
-  delete current.twelveDataApiKey;
-  delete current.fmpApiKey;
-  return {
-    ...DEFAULT_CONFIG,
-    ...current,
-    appearance: {
-      ...DEFAULT_CONFIG.appearance,
-      ...current.appearance,
-      scale: normalizeAppearanceScale(current.appearance?.scale),
-      historyRange: normalizeHistoryRange(current.appearance?.historyRange),
-      showCash: typeof current.appearance?.showCash === 'boolean' ? current.appearance.showCash : typeof current.schemaVersion === 'number' && current.schemaVersion <= 8,
-      showDebt: typeof current.appearance?.showDebt === 'boolean' ? current.appearance.showDebt : typeof current.schemaVersion === 'number' && current.schemaVersion <= 8
-    },
-    refreshMode: normalizeRefreshMode(current.refreshMode),
-    stockSession: normalizeStockSession(current.stockSession),
-    historyStartDate: typeof current.historyStartDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(current.historyStartDate)
-      ? current.historyStartDate
-      : DEFAULT_CONFIG.historyStartDate,
-    historyStartMode: current.historyStartMode === 'manual' ? 'manual' : 'auto',
-    showInTaskbar: typeof current.showInTaskbar === 'boolean' ? current.showInTaskbar : DEFAULT_CONFIG.showInTaskbar,
-    schemaVersion: 10
-  };
 }
 
 function wait(delay: number): Promise<void> {
@@ -80,7 +48,7 @@ function enqueueNativeWrite(updates: Record<string, unknown>): Promise<void> {
   return queued;
 }
 
-function hasNativeBridge(): boolean {
+export function hasNativeBridge(): boolean {
   return import.meta.env.MODE === 'desktop' || (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window);
 }
 
@@ -104,7 +72,7 @@ function readStoredState(values: {
   rawLedger: PortfolioLedger | null | undefined;
   ledgerPriceCache: LedgerPriceCache | null | undefined;
 }) {
-  const config = mergeConfig(values.rawConfig);
+  const config = normalizeConfig(values.rawConfig);
   const storedLedger = sanitizeLedger(values.rawLedger);
   const ledger = storedLedger ?? migrateLegacyHoldings(Array.isArray(values.rawConfig?.holdings) ? values.rawConfig.holdings : [], config.historyStartDate);
   return {
@@ -152,6 +120,16 @@ export async function saveConfig(config: AppConfig): Promise<void> {
 export async function saveQuotes(quotes: Quote[]): Promise<void> {
   if (!hasNativeBridge()) return localStorage.setItem(QUOTES_KEY, JSON.stringify(quotes));
   return enqueueNativeWrite({ [QUOTES_KEY]: quotes });
+}
+
+/** One refresh commits its quote and optional recent-value caches together. */
+export async function saveRefreshCache(quotes: Quote[], recent?: PortfolioHourlyCache): Promise<void> {
+  if (!hasNativeBridge()) {
+    await saveQuotes(quotes);
+    if (recent) await saveHourlyHistory(recent);
+    return;
+  }
+  return enqueueNativeWrite({ [QUOTES_KEY]: quotes, ...(recent ? { [HOURLY_HISTORY_KEY]: sanitizeHourlyCache(recent) } : {}) });
 }
 
 export async function saveHistoryCache(historyCache: HistoricalCache): Promise<void> {

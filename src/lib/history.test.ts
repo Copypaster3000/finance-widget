@@ -1,53 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
-import { calculateHistoryChange, calculatePortfolioHistory, cachedSeries, historyKey, syncHistoricalCache } from './history';
-import type { HistoricalCache, HistoricalSeries, Holding, PriceProvider, Quote } from './types';
+import { calculateHistoryChange, cachedSeries, historyKey, syncHistoricalCache } from './history';
+import type { HistoricalCache, HistoricalSeries, Holding, PriceProvider } from './types';
 
 const stock = (id: string, symbol: string, quantity: number): Holding => ({ id, symbol, type: 'stock', quantity });
-const crypto = (id: string, symbol: string, quantity: number): Holding => ({ id, symbol, type: 'crypto', quantity });
-const quote = (symbol: string, assetType: Holding['type'], price: number): Quote => ({ symbol, assetType, price, currency: 'USD', timestamp: 1, provider: 'test', status: 'live' });
 const series = (symbol: string, assetType: Holding['type'], values: Array<[string, number]>): HistoricalSeries => ({ symbol, assetType, points: values.map(([date, price]) => ({ date, price })) });
 
 describe('portfolio history calculations', () => {
-  it('values one holding and integrates the latest quote', () => {
-    const result = calculatePortfolioHistory([stock('a', 'AAA', 2)], [series('AAA', 'stock', [['2026-08-17', 10]])], [quote('AAA', 'stock', 12)], '2026-08-17', '2026-08-18');
-    expect(result.map((point) => point.value)).toEqual([20, 24]);
-  });
-
-  it('sums multiple holdings including fractional quantities', () => {
-    const result = calculatePortfolioHistory(
-      [stock('a', 'AAA', 2.5), crypto('b', 'BTC', 0.25)],
-      [series('AAA', 'stock', [['2026-08-17', 10]]), series('BTC', 'crypto', [['2026-08-17', 100]])],
-      [quote('AAA', 'stock', 11), quote('BTC', 'crypto', 120)], '2026-08-17', '2026-08-18'
-    );
-    expect(result.map((point) => point.value)).toEqual([50, 57.5]);
-  });
-
-  it('carries stock prices through a weekend while crypto remains daily', () => {
-    const result = calculatePortfolioHistory(
-      [stock('a', 'AAA', 1), crypto('b', 'BTC', 1)],
-      [series('AAA', 'stock', [['2026-08-21', 10], ['2026-08-24', 12]]), series('BTC', 'crypto', [['2026-08-21', 20], ['2026-08-22', 21], ['2026-08-23', 22], ['2026-08-24', 23]])],
-      [quote('AAA', 'stock', 12), quote('BTC', 'crypto', 23)], '2026-08-21', '2026-08-24'
-    );
-    expect(result.map((point) => point.value)).toEqual([30, 31, 32, 35]);
-  });
-
-  it('starts at the earliest common valid date rather than substituting zero', () => {
-    const result = calculatePortfolioHistory(
-      [stock('a', 'AAA', 1), stock('b', 'BBB', 1)],
-      [series('AAA', 'stock', [['2026-08-17', 10], ['2026-08-18', 11]]), series('BBB', 'stock', [['2026-08-18', 20]])],
-      [], '2026-08-17', '2026-08-19'
-    );
-    expect(result).toEqual([{ date: '2026-08-18', value: 31 }, { date: '2026-08-19', value: 31 }]);
-  });
-
-  it('recalculates history after a quantity edit or holding removal', () => {
-    const data = [series('AAA', 'stock', [['2026-08-17', 10]]), series('BBB', 'stock', [['2026-08-17', 20]])];
-    expect(calculatePortfolioHistory([stock('a', 'AAA', 2), stock('b', 'BBB', 1)], data, [], '2026-08-17', '2026-08-17')[0].value).toBe(40);
-    expect(calculatePortfolioHistory([stock('a', 'AAA', 3)], data, [], '2026-08-17', '2026-08-17')[0].value).toBe(30);
-  });
-
   it('handles a zero-value portfolio and a zero starting value safely', () => {
-    expect(calculatePortfolioHistory([stock('a', 'AAA', 0)], [], [], '2026-08-17', '2026-08-18')).toEqual([]);
     expect(calculateHistoryChange([{ date: '2026-08-17', value: 0 }, { date: '2026-08-18', value: 10 }])).toBe(0);
   });
 

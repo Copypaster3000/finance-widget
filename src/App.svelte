@@ -10,6 +10,7 @@
   import Header from './components/Header.svelte';
   import PortfolioView from './components/PortfolioView.svelte';
   import SettingsView from './components/SettingsView.svelte';
+  import { earliestBuyDate, resolveHistoryStart } from './lib/historyStart';
   import { localCalendarDate } from './lib/calendar';
   import { DEFAULT_CONFIG } from './lib/defaults';
   import { detectLedgerPriceSourceTransition, mergeIncomingQuotes, missingQuoteCount, preferredStoredQuotes, resolveFeedState, summarizeHistoryErrors } from './lib/feed';
@@ -17,12 +18,12 @@
   import { resolveCurrentTradePrice, sanitizeQuotes } from './lib/quotePolicy';
   import { RefreshQueue, withTimeout } from './lib/requests';
   import { availableHistoryRanges, chartHistory, completedHour, EMPTY_HOURLY_CACHE, portfolioChangeSinceLocalMidnight, recordRecentPortfolio } from './lib/hourly';
-  import { deleteLedgerEvent, emptyLedger, ledgerHoldings, previewLedgerEvent, replayLedger, updateLedgerEvent, updateLedgerEventRemovingAdjustments } from './lib/ledger';
+  import { deleteLedgerEvent, emptyLedger, accountHoldings, previewLedgerEvent, replayLedger, updateLedgerEvent, updateLedgerEventRemovingAdjustments } from './lib/ledger';
   import { calculateLedgerHistory, EMPTY_LEDGER_PRICE_CACHE, syncLedgerPriceCache } from './lib/ledgerHistory';
   import { isUsEquityExtendedSessionOpen, isUsEquityMarketOpen } from './lib/market';
   import { calculateLedgerPortfolio } from './lib/portfolio';
   import { createProvider } from './lib/providers';
-  import { loadState, saveConfig, saveHistoryCache, saveHourlyHistory, saveLedger, saveLedgerState, saveLedgerPriceCache, saveQuotes } from './lib/storage';
+  import { hasNativeBridge, loadState, saveConfig, saveHistoryCache, saveLedger, saveLedgerState, saveLedgerPriceCache, saveQuotes, saveRefreshCache } from './lib/storage';
   import type { AccountActivity, AppConfig, AssetType, FeedStatus, HistoricalCache, HistoryRange, LedgerAsset, LedgerEvent, LedgerEventPreviewResult, LedgerMutationError, LedgerPriceCache, PortfolioHourlyCache, PortfolioLedger, Quote, RefreshMode, TransactionPriceResolution } from './lib/types';
 
   type View = 'portfolio' | 'settings' | 'asset' | 'cash' | 'debt' | 'new-asset';
@@ -40,6 +41,8 @@
   let ready = false;
   let storageUnavailable = false;
   let storageDetail = '';
+  let operationError = '';
+  let savingHistoryRange = false;
   let recoveredAt: number | undefined;
   let portfolioRecovered = false;
   let pendingForce = false;
@@ -60,7 +63,7 @@
 
   $: replay = replayLedger(ledger);
   $: account = replay.state;
-  $: holdings = ledgerHoldings(ledger);
+  $: holdings = accountHoldings(account);
   $: valuation = guardedValuation(account, quotes);
   $: summary = valuation.summary;
   $: missingPrices = missingQuoteCount(quotes, holdings);
@@ -77,10 +80,12 @@
   $: selectedPosition = account.positions.find((position) => position.asset.id === selectedAssetId);
   $: selectedQuote = selectedAsset ? quotes.find((quote) => quote.assetType === selectedAsset.type && quote.symbol === selectedAsset.symbol) : undefined;
   $: if (appMounted) void setEditingMinimum(view !== 'portfolio');
+  function windowFailure() { if (hasNativeBridge()) operationError = 'WINDOW UPDATE FAILED — Please try again.'; }
   async function setEditingMinimum(editing: boolean) {
+    if (!hasNativeBridge()) return;
     try { const w = getCurrentWindow(); await w.setMinSize(new LogicalSize(editing ? 360 : 120, editing ? 480 : 192));
       if (editing && (windowPixels.width / windowScale < 360 || windowPixels.height / windowScale < 480)) await w.setSize(new LogicalSize(Math.max(360, windowPixels.width / windowScale), Math.max(480, windowPixels.height / windowScale)));
-    } catch { /* Browser preview has no native window. */ }
+    } catch { windowFailure(); }
   }
   $: accent = config.appearance.accent;
   $: textScale = config.appearance.scale;
@@ -106,12 +111,6 @@
   }
 
   function today(): string { return localCalendarDate(); }
-  function earliestBuyDate(targetLedger: PortfolioLedger): string | undefined {
-    return targetLedger.events.filter((event) => event.eventType === 'buy').map((event) => event.date).sort()[0];
-  }
-  function resolveHistoryStart(targetConfig: AppConfig, targetLedger: PortfolioLedger): string {
-    return targetConfig.historyStartMode === 'manual' ? targetConfig.historyStartDate : earliestBuyDate(targetLedger) ?? targetConfig.historyStartDate;
-  }
   function isStockSessionActive(targetConfig: AppConfig): boolean { return targetConfig.stockSession === 'extended' ? isUsEquityExtendedSessionOpen() : isUsEquityMarketOpen(); }
   function schedule(mode: RefreshMode) { if (timer) clearInterval(timer); timer = undefined; const interval = intervals[mode]; if (interval) timer = setInterval(() => void refresh(), interval); }
   function scheduleDayBoundary() { if (dayBoundaryTimer) clearTimeout(dayBoundaryTimer); const nextMidnight = new Date(); nextMidnight.setHours(24, 0, 0, 0); dayBoundaryTimer = setTimeout(() => { clockNow = Date.now(); scheduleDayBoundary(); }, Math.max(1, nextMidnight.getTime() - Date.now() + 50)); }
@@ -155,8 +154,10 @@
         const nextValue = calculateLedgerPortfolio(snapshot, nextQuotes).totalValue;
         const transition = detectLedgerPriceSourceTransition(snapshot, previousQuotes, nextQuotes, checkedAt);
         quotes = nextQuotes;
-        await saveQuotes(quotes); clockNow = checkedAt;
-        if (config.refreshMode === '15s' || config.refreshMode === '15m') { hourlyHistory = recordRecentPortfolio(hourlyHistory, nextValue, checkedAt); await saveHourlyHistory(hourlyHistory); }
+        const recent = config.refreshMode === '15s' || config.refreshMode === '15m'
+          ? recordRecentPortfolio(hourlyHistory, nextValue, checkedAt) : undefined;
+        await saveRefreshCache(quotes, recent); clockNow = checkedAt;
+        if (recent) hourlyHistory = recent;
         feed = { ...feed, provider: result.quotes[0]?.provider ?? provider.name, lastQuoteReceivedAt: checkedAt, transition };
       }
       const hasStocks = holdings.some((holding) => holding.type === 'stock');
@@ -182,7 +183,9 @@
     await saveLedgerState(ledger, next, hourlyHistory, nextPrices);
     refreshQueue.invalidate(); historyRequest++;
     config = next; ledgerPriceCache = nextPrices; view = 'portfolio'; historyAttemptedThrough = ''; schedule(config.refreshMode);
-    try { await getCurrentWindow().setAlwaysOnTop(config.windowMode === 'alwaysOnTop'); await getCurrentWindow().setSkipTaskbar(!config.showInTaskbar); if (startupChanged) { const enabled = await isEnabled(); if (config.launchAtStartup && !enabled) await enable(); if (!config.launchAtStartup && enabled) await disable(); } } catch { /* preview */ }
+    if (hasNativeBridge()) {
+      try { await getCurrentWindow().setAlwaysOnTop(config.windowMode === 'alwaysOnTop'); await getCurrentWindow().setSkipTaskbar(!config.showInTaskbar); if (startupChanged) { const enabled = await isEnabled(); if (config.launchAtStartup && !enabled) await enable(); if (!config.launchAtStartup && enabled) await disable(); } } catch { windowFailure(); }
+    }
     await refresh(true);
   }
 
@@ -267,7 +270,14 @@
     else view = event.eventType.startsWith('cash_') ? 'cash' : 'debt';
   }
   function backToPortfolio() { view = 'portfolio'; selectedAssetId = ''; selectedEventId = ''; }
-  function setHistoryRange(range: HistoryRange) { config = { ...config, appearance: { ...config.appearance, historyRange: range } }; void saveConfig(config); }
+  async function setHistoryRange(range: HistoryRange) {
+    if (savingHistoryRange) return;
+    savingHistoryRange = true; operationError = '';
+    const next = { ...config, appearance: { ...config.appearance, historyRange: range } };
+    try { await saveConfig(next); config = next; }
+    catch { operationError = 'HISTORY RANGE NOT SAVED — Please try again.'; }
+    finally { savingHistoryRange = false; }
+  }
   async function closeWindow() { try { await exit(0); } catch { window.close(); } }
   function beginResize(event: PointerEvent) {
     if (event.button !== 0) return;
@@ -277,17 +287,17 @@
     event.preventDefault(); event.stopPropagation();
   }
   function continueResize(event: PointerEvent) {
-    if (!resizeState || resizeState.pointerId !== event.pointerId) return;
+    if (!hasNativeBridge() || !resizeState || resizeState.pointerId !== event.pointerId) return;
     const width = Math.max((view === 'portfolio' ? 120 : 360) * windowScale, resizeState.width + (event.screenX - resizeState.startX) * windowScale);
     const height = Math.max((view === 'portfolio' ? 192 : 480) * windowScale, resizeState.height + (event.screenY - resizeState.startY) * windowScale);
-    void getCurrentWindow().setSize(new PhysicalSize(Math.round(width), Math.round(height)));
+    void getCurrentWindow().setSize(new PhysicalSize(Math.round(width), Math.round(height))).catch(windowFailure);
   }
   function endResize(event: PointerEvent) {
     if (!resizeState || resizeState.pointerId !== event.pointerId) return;
     if (resizeState.target.hasPointerCapture(event.pointerId)) resizeState.target.releasePointerCapture(event.pointerId);
     resizeState = undefined;
   }
-  function resetWindowSize() { void getCurrentWindow().setSize(new PhysicalSize(Math.round(474 * windowScale), Math.round(700 * windowScale))); }
+  function resetWindowSize() { if (hasNativeBridge()) void getCurrentWindow().setSize(new PhysicalSize(Math.round(474 * windowScale), Math.round(700 * windowScale))).catch(windowFailure); }
 
   async function initializeApp() {
     if (storageRetrying) return;
@@ -299,14 +309,16 @@
       config = state.config; ledger = state.ledger; historicalCache = state.historyCache; ledgerPriceCache = state.ledgerPriceCache; hourlyHistory = state.hourlyHistory;
       const originalHistoryStart = config.historyStartDate;
       if (config.historyStartMode === 'auto') config = { ...config, historyStartDate: earliestBuyDate(ledger) ?? config.historyStartDate };
-      const loadedHoldings = ledgerHoldings(state.ledger); const active = new Set(loadedHoldings.map((holding) => `${holding.type}:${holding.symbol.toUpperCase()}`));
+      const loadedHoldings = accountHoldings(replayLedger(state.ledger).state); const active = new Set(loadedHoldings.map((holding) => `${holding.type}:${holding.symbol.toUpperCase()}`));
       quotes = preferredStoredQuotes(state.quotes.filter((quote) => active.has(`${quote.assetType}:${quote.symbol}`)), loadedHoldings);
       if (state.ledgerMigrated || state.configMigrated || config.historyStartDate !== originalHistoryStart) await saveLedgerState(ledger, config, hourlyHistory, ledgerPriceCache);
       if (!appMounted) return;
       storageUnavailable = false;
       feed = { state: !loadedHoldings.length ? 'idle' : quotes.length ? 'cached' : 'unavailable', provider: quotes[0]?.provider, lastCheckedAt: 0, lastQuoteReceivedAt: 0 };
       ready = true; schedule(config.refreshMode); scheduleDayBoundary();
-      try { await getCurrentWindow().setAlwaysOnTop(config.windowMode === 'alwaysOnTop'); await getCurrentWindow().setSkipTaskbar(!config.showInTaskbar); } catch { /* preview */ }
+      if (hasNativeBridge()) {
+        try { await getCurrentWindow().setAlwaysOnTop(config.windowMode === 'alwaysOnTop'); await getCurrentWindow().setSkipTaskbar(!config.showInTaskbar); } catch { windowFailure(); }
+      }
       void refresh(true);
     } catch (error) {
       if (!appMounted) return;
@@ -321,11 +333,11 @@
 
   onMount(() => {
     appMounted = true;
-    const appWindow = getCurrentWindow();
-    void Promise.all([appWindow.outerSize(), appWindow.scaleFactor()]).then(([size, scale]) => { windowPixels = size; windowScale = scale; });
-    const stopResizeListener = appWindow.onResized(({ payload }) => { windowPixels = payload; });
+    const appWindow = hasNativeBridge() ? getCurrentWindow() : undefined;
+    if (appWindow) void Promise.all([appWindow.outerSize(), appWindow.scaleFactor()]).then(([size, scale]) => { windowPixels = size; windowScale = scale; }).catch(windowFailure);
+    const stopResizeListener = appWindow?.onResized(({ payload }) => { windowPixels = payload; }).catch(() => { windowFailure(); return undefined; });
     void initializeApp();
-    return () => { appMounted = false; void stopResizeListener.then((unlisten) => unlisten()); if (timer) clearInterval(timer); if (dayBoundaryTimer) clearTimeout(dayBoundaryTimer); };
+    return () => { appMounted = false; void stopResizeListener?.then((unlisten) => unlisten?.()); if (timer) clearInterval(timer); if (dayBoundaryTimer) clearTimeout(dayBoundaryTimer); };
   });
 </script>
 
@@ -335,6 +347,7 @@
   <div class="frame-corner tl"></div><div class="frame-corner tr"></div><div class="frame-corner bl"></div><div class="frame-corner br"></div>
   <div class="resize-grip" aria-hidden="true" title="Drag to resize; double-click to reset" on:dblclick={resetWindowSize} on:pointerdown={beginResize} on:pointermove={continueResize} on:pointerup={endResize} on:pointercancel={endResize}></div>
   <Header mode={config.refreshMode} {refreshing} context={storageUnavailable ? 'storage' : view === 'portfolio' ? 'portfolio' : view === 'settings' ? 'settings' : 'ledger'} {privacyHidden} onPrivacy={() => privacyHidden = !privacyHidden} onRefresh={() => void refresh(true)} onSettings={() => view === 'portfolio' ? (view = 'settings') : backToPortfolio()} onClose={closeWindow}/>
+  {#if operationError}<p class="form-error" role="alert">{operationError}</p>{/if}
   {#if storageUnavailable}
     <section class="storage-unavailable">
       <span>LOCAL STORAGE / LOAD INTERRUPTED</span>

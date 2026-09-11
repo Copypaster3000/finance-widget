@@ -23,7 +23,7 @@ This is a native Windows 11 desktop finance widget: Tauri 2 + Rust shell, Svelte
 - `src/lib/ledger.ts` is the deterministic source of truth for positions, FIFO lots, Cash, Debt, and realized cost basis.
 - Ledger money is persisted as decimal strings and replayed as integer cents; quantities use eight fixed decimal places and unit prices use six.
 - Buys consume Cash before creating Debt. Sales and deposits pay Debt before creating Cash. Withdrawals consume Cash before increasing Debt.
-- Legacy manual quantities migrate to unknown-basis `opening_position` events without changing Cash or Debt.
+- Legacy manual quantities migrate to unknown-basis external `buy` events without changing Cash or Debt.
 - Historical portfolio value replays every event through each date and values reconstructed quantities alongside Cash minus Debt.
 - `src/lib/calendar.ts` owns local calendar boundaries; never derive user-facing dates by slicing UTC ISO timestamps.
 - `src/lib/feed.ts` owns quote provenance, cached/live preference, and feed status terminology.

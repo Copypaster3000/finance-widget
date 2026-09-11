@@ -1,33 +1,6 @@
-import type { Holding, LedgerAccountState, PortfolioSummary, Position, Quote } from './types';
+import type { LedgerAccountState, PortfolioSummary, Position, Quote } from './types';
 import { sanitizeQuotes, quoteFreshness } from './quotePolicy';
-import { safeNumber, MAX_QUANTITY } from './decimal';
-
-export function normalizeQuantity(value: unknown): number {
-  const quantity = typeof value === 'number' ? value : Number(value);
-  return Number.isFinite(quantity) && quantity >= 0 ? safeNumber(quantity, MAX_QUANTITY) : 0;
-}
-
-export function calculatePortfolio(holdings: Holding[], quotes: Quote[]): PortfolioSummary {
-  const quoteMap = new Map(sanitizeQuotes(quotes).map((quote) => [`${quote.assetType}:${quote.symbol.toUpperCase()}`, quote]));
-  const positions = holdings.map((holding) => {
-    const quantity = normalizeQuantity(holding.quantity);
-    const quote = quoteMap.get(`${holding.type}:${holding.symbol.toUpperCase()}`);
-    const value = quote && Number.isFinite(quote.price) ? quantity * quote.price : 0;
-    const dailyChangeValue = quote?.previousClose != null ? quantity * (quote.price - quote.previousClose) : undefined;
-    return { ...holding, quantity, quote, value, allocation: 0, dailyChangeValue };
-  });
-
-  const totalValue = safeNumber(positions.reduce((total, position) => total + position.value, 0));
-  for (const position of positions) position.allocation = totalValue > 0 ? (position.value / totalValue) * 100 : 0;
-  positions.sort((left, right) => right.value - left.value);
-
-  const changes = positions.map((position) => position.dailyChangeValue).filter((value): value is number => value != null);
-  const dailyChangeValue = changes.length ? changes.reduce((total, value) => total + value, 0) : undefined;
-  const priorValue = dailyChangeValue == null ? undefined : totalValue - dailyChangeValue;
-  const dailyChangePercent = priorValue && priorValue > 0 && dailyChangeValue != null ? (dailyChangeValue / priorValue) * 100 : undefined;
-
-  return { positions, totalValue, grossAssets: totalValue, cash: 0, debt: 0, dailyChangeValue, dailyChangePercent, investmentPositionCount: positions.length };
-}
+import { safeNumber } from './decimal';
 
 export function calculateLedgerPortfolio(account: LedgerAccountState, quotes: Quote[]): PortfolioSummary {
   const quoteMap = new Map(sanitizeQuotes(quotes).map((quote) => [`${quote.assetType}:${quote.symbol.toUpperCase()}`, quote]));
@@ -51,12 +24,6 @@ export function calculateLedgerPortfolio(account: LedgerAccountState, quotes: Qu
   const priorValue = dailyChangeValue == null ? undefined : totalValue - dailyChangeValue;
   const dailyChangePercent = priorValue && priorValue !== 0 && dailyChangeValue != null ? (dailyChangeValue / priorValue) * 100 : undefined;
   return { positions, totalValue, grossAssets, cash: account.cash, debt: account.debt, dailyChangeValue, dailyChangePercent, investmentPositionCount: account.positions.filter((position) => position.quantity > 0).length };
-}
-
-export function isQuoteUsable(value: unknown): value is Pick<Quote, 'price'> {
-  if (!value || typeof value !== 'object') return false;
-  const price = (value as { price?: unknown }).price;
-  return typeof price === 'number' && Number.isFinite(price) && price > 0;
 }
 
 export function isQuoteStale(quote: Quote, now = Date.now(), maxAgeMs = 15 * 60_000): boolean {

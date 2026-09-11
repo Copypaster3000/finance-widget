@@ -1,7 +1,5 @@
-import { normalizeQuantity } from './portfolio';
 import { MAX_MONEY, MAX_PRICE } from './decimal';
-import { localCalendarStartTimestamp } from './calendar';
-import type { HistoryRange, Holding, HourlyPricePoint, PortfolioDayChange, PortfolioHistoryPoint, PortfolioHourlyCache, PriceProvider } from './types';
+import type { HistoryRange, HourlyPricePoint, PortfolioDayChange, PortfolioHistoryPoint, PortfolioHourlyCache } from './types';
 
 const HOUR_MS = 3_600_000;
 const RANGE_MS: Partial<Record<HistoryRange, number>> = {
@@ -26,10 +24,6 @@ export const EMPTY_HOURLY_CACHE: PortfolioHourlyCache = {
   recentPoints: [],
   assetPrices: {}
 };
-
-function assetKey(holding: Pick<Holding, 'type' | 'symbol'>): string {
-  return `${holding.type}:${holding.symbol.trim().toUpperCase()}`;
-}
 
 export function hourTimestamp(value: string | number | Date): string {
   const date = new Date(value);
@@ -84,71 +78,6 @@ export function recordRecentPortfolio(
     { date: new Date(now).toISOString(), value }
   ]);
   return { ...cache, recentPoints };
-}
-
-export async function syncHourlyPortfolio(
-  provider: PriceProvider,
-  holdings: Holding[],
-  cacheValue: PortfolioHourlyCache,
-  historyStartDate: string,
-  endTime = completedHour(),
-  requestedHoldings = holdings
-): Promise<{ cache: PortfolioHourlyCache; errors: string[]; changed: boolean }> {
-  const active = holdings.filter((holding) => normalizeQuantity(holding.quantity) > 0);
-  const cache = sanitizeHourlyCache(cacheValue);
-  if (!active.length) return { cache, errors: [], changed: false };
-  if (!provider.getHourlyPrices) return { cache, errors: ['Hourly history is not supported by this provider'], changed: false };
-
-  const configuredStart = new Date(localCalendarStartTimestamp(historyStartDate)).toISOString();
-  const nextHour = cache.coveredThrough ? new Date(Date.parse(cache.coveredThrough) + HOUR_MS).toISOString() : configuredStart;
-  const startTime = nextHour < configuredStart ? configuredStart : nextHour;
-  if (startTime > endTime) return { cache, errors: [], changed: false };
-
-  const requestedKeys = new Set(requestedHoldings.map((holding) => assetKey(holding)));
-  const requested = active.filter((holding) => requestedKeys.has(assetKey(holding)));
-  const result = requested.length ? await provider.getHourlyPrices(requested, startTime, endTime) : { series: [], errors: [] };
-  const prices = { ...cache.assetPrices };
-  const events = new Map<string, Array<{ key: string; price: number }>>();
-  const seriesKeys = new Set<string>();
-  for (const item of result.series) {
-    const key = `${item.assetType}:${item.symbol.toUpperCase()}`;
-    seriesKeys.add(key);
-    for (const point of item.points) {
-      if (!validHourlyPoint(point)) continue;
-      const timestamp = hourTimestamp(point.timestamp);
-      if (timestamp < startTime || timestamp > endTime) continue;
-      const updates = events.get(timestamp) ?? [];
-      updates.push({ key, price: point.price });
-      events.set(timestamp, updates);
-    }
-  }
-
-  const additions: PortfolioHistoryPoint[] = [];
-  for (const timestamp of [...events.keys()].sort()) {
-    for (const update of events.get(timestamp) ?? []) prices[update.key] = { timestamp, price: update.price };
-    let value = 0;
-    let complete = true;
-    for (const holding of active) {
-      const price = prices[assetKey(holding)]?.price;
-      if (price == null) { complete = false; break; }
-      value += normalizeQuantity(holding.quantity) * price;
-    }
-    if (complete && Number.isFinite(value)) additions.push({ date: timestamp, value });
-  }
-
-  const completeCoverage = active.every((holding) => prices[assetKey(holding)] != null) &&
-    requested.every((holding) => seriesKeys.has(assetKey(holding)));
-  const errors = [...result.errors];
-  if (!completeCoverage && !errors.length) errors.push('Hourly portfolio history is incomplete');
-  const points = sanitizeValuePoints([...cache.points, ...additions]);
-  const next: PortfolioHourlyCache = {
-    schemaVersion: 2,
-    coveredThrough: completeCoverage ? endTime : cache.coveredThrough,
-    points,
-    recentPoints: cache.recentPoints,
-    assetPrices: prices
-  };
-  return { cache: next, errors, changed: additions.length > 0 || next.coveredThrough !== cache.coveredThrough };
 }
 
 export function availableHistoryRanges(cacheValue: PortfolioHourlyCache, now = Date.now()): HistoryRange[] {

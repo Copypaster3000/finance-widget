@@ -8,7 +8,6 @@ import type {
   LedgerAccountState,
   LedgerAsset,
   LedgerEvent,
-  LedgerEventPreview,
   LedgerEventPreviewResult,
   LedgerLotState,
   LedgerPositionState,
@@ -51,9 +50,8 @@ export function nextSequence(events: LedgerEvent[], date: string): number {
   return Math.max(0, ...events.filter((event) => event.date === date).map((event) => event.sequence)) + 1;
 }
 
-export function ledgerHoldings(ledger: PortfolioLedger, asOfDate?: string): Holding[] {
-  const replay = replayLedger(ledger, asOfDate);
-  return replay.state.positions
+export function accountHoldings(account: LedgerAccountState): Holding[] {
+  return account.positions
     .filter((position) => position.quantity > 0)
     .map((position) => ({ id: position.asset.id, symbol: position.asset.symbol, type: position.asset.type, quantity: position.quantity }));
 }
@@ -139,6 +137,7 @@ export function createLedgerCursor(ledgerValue: PortfolioLedger, today = localDa
 
       const unknownExternalBuy = event.eventType === 'buy' && event.affectsCashDebt === false && event.priceSource === 'legacy_unknown' && event.totalAmount === undefined && event.unitPrice === undefined;
       if (unknownExternalBuy) {
+        if (parseFixed(event.fees, MONEY_DIGITS) !== 0n) { issue(issues, event, 'Unknown-basis Buy must have zero fees'); return; }
         position.quantity += quantity;
         position.lots.push({ sourceEventId: event.id, acquiredDate: event.date, quantity, costBasis: undefined });
         return;
@@ -276,12 +275,12 @@ export function replayLedger(ledger: PortfolioLedger, asOfDate?: string, today =
   return cursor.snapshot(asOfDate);
 }
 
-export function updateLedgerEvent(ledger: PortfolioLedger, event: LedgerEvent, today?: string): { ledger?: PortfolioLedger; issues: LedgerValidationIssue[] } {
+export function updateLedgerEvent(ledger: PortfolioLedger, event: LedgerEvent, today?: string): { ledger?: PortfolioLedger; issues: LedgerValidationIssue[]; replay?: LedgerReplayResult } {
   const exists = ledger.events.some((candidate) => candidate.id === event.id);
   const next = { ...ledger, events: exists ? ledger.events.map((candidate) => candidate.id === event.id ? event : candidate) : [...ledger.events, event] };
   try {
     const result = replayLedger(next, undefined, today);
-    return result.issues.length ? { issues: result.issues } : { ledger: next, issues: [] };
+    return result.issues.length ? { issues: result.issues } : { ledger: next, issues: [], replay: result };
   } catch (error) { return { issues: [{ eventId: event.id, date: event.date, message: String(error) }] }; }
 }
 
@@ -317,7 +316,7 @@ export function previewLedgerEvent(ledger: PortfolioLedger, event: LedgerEvent, 
   if (before.issues.length) return { issues: before.issues };
   const updated = updateLedgerEvent(ledger, event, today);
   if (!updated.ledger) return { issues: updated.issues };
-  const after = replayLedger(updated.ledger, undefined, today);
+  const after = updated.replay!;
   const assetId = 'assetId' in event ? event.assetId : undefined;
   const beforeQuantity = assetId ? before.state.positions.find((position) => position.asset.id === assetId)?.quantity ?? 0 : 0;
   const afterQuantity = assetId ? after.state.positions.find((position) => position.asset.id === assetId)?.quantity ?? 0 : 0;

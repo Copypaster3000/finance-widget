@@ -1,8 +1,8 @@
-import { compareLedgerEvents, createLedgerCursor, replayLedger } from './ledger';
+import { compareLedgerEvents, createLedgerCursor } from './ledger';
+import { earliestBuyDate, resolveHistoryStart } from './historyStart';
 import { safeNumber, MAX_PRICE } from './decimal';
-import { sanitizeQuotes } from './quotePolicy';
 import { calendarDateFromTimestamp, localCalendarEndTimestamp, localCalendarStartTimestamp } from './calendar';
-import type { HistoryStartMode, Holding, HourlyPricePoint, LedgerPriceCache, LedgerPriceCacheEntry, PortfolioHistoryPoint, PortfolioLedger, PriceProvider, Quote } from './types';
+import type { HistoryStartMode, Holding, HourlyPricePoint, LedgerPriceCache, LedgerPriceCacheEntry, PortfolioHistoryPoint, PortfolioLedger, PriceProvider } from './types';
 
 const HOUR_MS = 3_600_000;
 export const EMPTY_LEDGER_PRICE_CACHE: LedgerPriceCache = { schemaVersion: 1, entries: {} };
@@ -73,13 +73,8 @@ export function calculateLedgerHistory(
   historyStartMode: HistoryStartMode = 'auto'
 ): PortfolioHistoryPoint[] {
   const cache = sanitizeLedgerPriceCache(cacheValue);
-  const earliestBuyDate = ledger.events
-    .filter((event) => event.eventType === 'buy')
-    .map((event) => event.date)
-    .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date))
-    .sort()[0];
-  if (historyStartMode === 'auto' && !earliestBuyDate) return [];
-  const effectiveStartDate = historyStartMode === 'manual' ? historyStartDate : earliestBuyDate!;
+  if (historyStartMode === 'auto' && !earliestBuyDate(ledger)) return [];
+  const effectiveStartDate = resolveHistoryStart({ historyStartMode, historyStartDate }, ledger);
   const updates = new Map<string, Array<{ assetKey: string; price: number }>>();
   for (const [assetKey, entry] of Object.entries(cache.entries)) {
     for (const point of entry.points) {
@@ -120,10 +115,4 @@ export function calculateLedgerHistory(
     if (complete) result.push({ date: timestamp, value: safeNumber(value) });
   }
   return [...new Map(result.map((point) => [point.date, point])).values()].sort((a, b) => a.date.localeCompare(b.date));
-}
-
-export function liveLedgerValue(ledger: PortfolioLedger, quotes: Quote[]): number {
-  const account = replayLedger(ledger).state;
-  const prices = new Map(sanitizeQuotes(quotes).map((quote) => [key(quote.assetType, quote.symbol), quote.price]));
-  return account.positions.reduce((total, position) => total + position.quantity * (prices.get(key(position.asset.type, position.asset.symbol)) ?? 0), account.cash - account.debt);
 }

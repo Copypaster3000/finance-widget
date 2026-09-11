@@ -1,6 +1,6 @@
 [package]
 name = "finance-widget"
-version = "0.1.4"
+version = "0.1.5"
 description = "Windows finance and portfolio widget"
 authors = ["Copypaster3000"]
 edition = "2021"
@@ -21,5 +21,4 @@ tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-autostart = "2"
 tauri-plugin-http = "2"
 tauri-plugin-process = "2"
-tauri-plugin-store = "2"
 tauri-plugin-window-state = "2"

@@ -1,16 +1,16 @@
 # Release candidate verification
 
-Current candidate: **0.1.3**. Publication is a separate, final action after manual verification. Do not upload an older installer just because it remains in the build directory.
+Current candidate: **0.1.5**. Publication is a separate, final action after manual verification. Do not upload an older installer just because it remains in the build directory.
 
 ## Current verification status
 
-The candidate's automated checks passed: 170 frontend tests across 19 files, 16 native persistence tests, Svelte checking with zero errors/warnings, frontend production build, and Windows Tauri/NSIS build. Public-data scanning and staged-diff checks also passed.
+See [safe cleanup verification](safe-cleanup-verification.md) for this candidate's automated results and scoped changes. Earlier installed verification does not certify newly built bits.
 
 **Pending:** disposable installed-profile regression, high-DPI visual verification, ordinary Start Menu/Search/Explorer launch parity, restart testing, and the subsequent real-profile smoke test. Automated tests are not evidence that these installed scenarios passed. No public release is authorized by this record.
 
 ## Automated gates
 
-Run `npm run check`, `npm test`, `npm run build`, native `cargo test --manifest-path src-tauri/Cargo.toml --lib`, `npm run tauri build`, and `npm run privacy:check`. Stage the exact version with `npm run release:stage`; use only the matching installer and checksum under `src-tauri/target/release-candidate/0.1.3/`.
+Run `npm run check`, `npm test`, `npm run build`, native `cargo test --manifest-path src-tauri/Cargo.toml --lib`, `npm run tauri build`, and `npm run privacy:check`. Stage the exact version with `npm run release:stage`; use only the matching installer and checksum under `src-tauri/target/release-candidate/0.1.5/`.
 
 ## Disposable installed-profile gates (not implied by unit tests)
 

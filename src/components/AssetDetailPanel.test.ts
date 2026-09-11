@@ -21,6 +21,31 @@ function props(overrides: Record<string, unknown> = {}) {
 
 afterEach(cleanup);
 
+describe('canonical displayed trade totals', () => {
+  it.each([
+    ['SELL', 'unit', '0.5', '0.03', '0.01', '$0.01'],
+    ['BUY', 'unit', '0.5', '0.03', '0.01', '$0.03'],
+    ['BUY', 'total', '0.5', '12.34', '0', '$12.34'],
+    ['SELL', 'total', '0.5', '12.34', '0', '$12.34'],
+    ['SELL', 'unit', '1', '1', '1', '$0.00']
+  ])('%s %s displays the canonical saved total (%s, %s, fee %s)', async (kind, mode, qty, price, fee, expected) => {
+    const input = props({ position: { ...position, quantity: 2, quantityDecimal: '2' } });
+    const { container } = render(AssetDetailPanel, { props: input });
+    await fireEvent.click(screen.getByRole('button', { name: `+ ${kind}` }));
+    await fireEvent.input(screen.getByLabelText('QUANTITY'), { target: { value: qty } });
+    if (mode === 'total') await fireEvent.click(screen.getByRole('button', { name: kind === 'BUY' ? 'TOTAL PAID' : 'TOTAL PROCEEDS' }));
+    await fireEvent.input(screen.getByLabelText(mode === 'unit' ? 'PRICE / UNIT' : kind === 'BUY' ? 'TOTAL PAID / FEES INCLUDED' : 'NET PROCEEDS / AFTER FEES'), { target: { value: price } });
+    if (mode === 'unit') await fireEvent.input(screen.getByLabelText('FEES'), { target: { value: fee } });
+    expect(container.querySelector('.calculated-total strong')?.textContent).toBe(expected);
+    await fireEvent.click(screen.getByRole('button', { name: `ADD ${kind}` }));
+    await waitFor(() => expect(input.onSave).toHaveBeenCalledOnce());
+    const saved = input.onSave.mock.calls[0][0];
+    expect(`$${Number(saved.totalAmount).toFixed(2)}`).toBe(expected);
+    const previewed = input.previewEvent.mock.calls.at(-1)?.[0];
+    expect(previewed).toMatchObject({ totalAmount: saved.totalAmount, fees: saved.fees, unitPrice: saved.unitPrice, quantity: saved.quantity });
+  });
+});
+
 describe('per-trade Cash and Debt control', () => {
   it('saves eight-decimal quantities without numeric binding conversion',async()=>{
     const input=props();render(AssetDetailPanel,{props:input});

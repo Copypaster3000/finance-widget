@@ -8,19 +8,12 @@ export function isCalendarDate(value: unknown): value is string {
   const month = Number(match[2]);
   const day = Number(match[3]);
   const date = new Date(Date.UTC(year, month - 1, day));
-  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+  return year >= 1900 && date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
 }
 
 export function localCalendarDate(timestamp = Date.now()): string {
   const date = new Date(timestamp);
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
-
-export function calendarDateInTimeZone(timestamp: number | string, timeZone: string): string {
-  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
-    timeZone, year: 'numeric', month: '2-digit', day: '2-digit'
-  }).formatToParts(new Date(timestamp)).map((part) => [part.type, part.value]));
-  return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
 export function calendarDateFromTimestamp(timestamp: number | string): string {

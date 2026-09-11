@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { calculateLedgerPortfolio, calculatePortfolio, isQuoteStale, isQuoteUsable, normalizeQuantity } from './portfolio';
+import { calculateLedgerPortfolio, isQuoteStale } from './portfolio';
+import { parseFixed } from './decimal';
+import { validQuote } from './quotePolicy';
 import type { Holding, Quote } from './types';
 
 const holdings: Holding[] = [
@@ -11,15 +13,22 @@ const quotes: Quote[] = [
   { symbol: 'BTC', assetType: 'crypto', price: 2000, previousClose: 1900, currency: 'USD', timestamp: 1000, provider: 'test', status: 'live' }
 ];
 
+function valueHoldings(values: Holding[], prices: Quote[]) {
+  return calculateLedgerPortfolio({ cash: 0, debt: 0, positions: values.map(h => ({
+    asset: { id: h.id, symbol: h.symbol, type: h.type, createdAt: '2020-01-01T00:00:00Z' },
+    quantity: h.quantity, quantityDecimal: String(h.quantity), lots: []
+  })) }, prices);
+}
+
 describe('portfolio calculations', () => {
   it('calculates fractional position values and total value', () => {
-    const result = calculatePortfolio(holdings, quotes);
-    expect(result.positions.map((position) => position.value)).toEqual([250, 250]);
+    const result = valueHoldings(holdings, quotes);
+    expect(result.positions.filter(p => p.type !== 'cash' && p.type !== 'debt').map((position) => position.value)).toEqual([250, 250]);
     expect(result.totalValue).toBe(500);
   });
 
   it('calculates allocations that sum to 100 percent', () => {
-    const result = calculatePortfolio(holdings, quotes);
+    const result = valueHoldings(holdings, quotes);
     expect(result.positions[0].allocation).toBe(50);
     expect(result.positions.reduce((sum, position) => sum + position.allocation, 0)).toBeCloseTo(100);
   });
@@ -35,33 +44,33 @@ describe('portfolio calculations', () => {
       { symbol: 'LARGE', assetType: 'stock', price: 100, currency: 'USD', timestamp: 1, provider: 'test', status: 'live' }
     ];
 
-    const result = calculatePortfolio(orderedHoldings, orderedQuotes);
+    const result = valueHoldings(orderedHoldings, orderedQuotes);
 
-    expect(result.positions.map((position) => position.symbol)).toEqual(['LARGE', 'SMALL', 'MISSING']);
-    expect(result.positions.map((position) => position.value)).toEqual([400, 25, 0]);
+    expect(result.positions.filter(p => p.type === 'stock').map((position) => position.symbol)).toEqual(['LARGE', 'SMALL', 'MISSING']);
+    expect(result.positions.filter(p => p.type === 'stock').map((position) => position.value)).toEqual([400, 25, 0]);
   });
 
   it('handles a zero-value portfolio', () => {
-    const result = calculatePortfolio([{ ...holdings[0], quantity: 0 }], []);
+    const result = valueHoldings([{ ...holdings[0], quantity: 0 }], []);
     expect(result.totalValue).toBe(0);
     expect(result.positions[0].allocation).toBe(0);
   });
 
   it('normalizes invalid and negative quantities without NaN', () => {
-    expect(normalizeQuantity('bad')).toBe(0);
-    expect(normalizeQuantity(-2)).toBe(0);
-    expect(normalizeQuantity('1.25')).toBe(1.25);
+    expect(parseFixed('bad', 8)).toBeUndefined();
+    expect(parseFixed('-2', 8)).toBeUndefined();
+    expect(parseFixed('1.25', 8)).toBe(125000000n);
   });
 
   it('keeps a missing quote as an unpriced position', () => {
-    const result = calculatePortfolio(holdings, [quotes[0]]);
+    const result = valueHoldings(holdings, [quotes[0]]);
     expect(result.positions[1].quote).toBeUndefined();
     expect(result.positions[1].value).toBe(0);
   });
 
   it('rejects malformed prices and detects stale quotes', () => {
-    expect(isQuoteUsable({ price: Number.NaN })).toBe(false);
-    expect(isQuoteUsable({ price: 42 })).toBe(true);
+    expect(validQuote({ ...quotes[0], price: Number.NaN })).toBe(false);
+    expect(validQuote({ ...quotes[0], price: 42 })).toBe(true);
     expect(isQuoteStale(quotes[0], 1000 + 16 * 60_000)).toBe(true);
   });
 });

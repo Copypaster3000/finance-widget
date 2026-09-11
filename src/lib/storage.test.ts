@@ -10,6 +10,24 @@ describe('native persistence', () => {
     vi.stubGlobal('localStorage', { getItem: (key:string) => values.get(key) ?? null, setItem: (key:string,value:string) => values.set(key,value) });
   });
   afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+  it('batches adjacent refresh caches into one native write instead of two', async () => {
+    mocked.invoke.mockResolvedValue(undefined);
+    const [{ saveRefreshCache, saveQuotes, saveHourlyHistory }, { EMPTY_HOURLY_CACHE }] = await Promise.all([import('./storage'), import('./hourly')]);
+    await saveQuotes([]); await saveHourlyHistory(EMPTY_HOURLY_CACHE);
+    expect(mocked.invoke).toHaveBeenCalledTimes(2);
+    mocked.invoke.mockClear();
+    await saveRefreshCache([], EMPTY_HOURLY_CACHE);
+    expect(mocked.invoke).toHaveBeenCalledTimes(1);
+    expect(Object.keys(mocked.invoke.mock.calls[0][1].updates).sort()).toEqual(['portfolio-hourly-history-v1', 'quote-cache']);
+  });
+  it('loads legacy config through the canonical normalizer and rejects impossible dates', async () => {
+    const raw = { schemaVersion: 1, historyStartDate: '2020-02-29', refreshMode: 'live', holdings: [] };
+    mocked.invoke.mockResolvedValue({ data: { configuration: raw }, metadata: { state: 'portfolioLoaded' } });
+    const [{ loadState }, { normalizeConfig }] = await Promise.all([import('./storage'), import('./config')]);
+    expect((await loadState()).config).toEqual(normalizeConfig(raw));
+    raw.historyStartDate = '2020-02-30';
+    await expect(loadState()).rejects.toThrow('Invalid history start date');
+  });
   it('retries native read errors without substituting browser data', async () => {
     mocked.invoke.mockRejectedValueOnce('Cannot read').mockResolvedValue({data:{},metadata:{state:'firstRunEmpty'}});
     const { loadState } = await import('./storage');

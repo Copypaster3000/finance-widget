@@ -1,4 +1,3 @@
-import { normalizeQuantity } from './portfolio';
 import { MAX_PRICE } from './decimal';
 import { isCalendarDate, shiftCalendarDate } from './calendar';
 import type {
@@ -9,11 +8,8 @@ import type {
   Holding,
   PortfolioHistoryPoint,
   PriceProvider,
-  ProviderKind,
-  Quote
+  ProviderKind
 } from './types';
-
-const DAY_MS = 86_400_000;
 
 export function isIsoDate(value: unknown): value is string {
   return isCalendarDate(value);
@@ -28,10 +24,6 @@ export function datesBetween(startDate: string, endDate: string): string[] {
   const dates: string[] = [];
   for (let date = startDate; date <= endDate; date = shiftDate(date, 1)) dates.push(date);
   return dates;
-}
-
-export function utcDate(timestamp = Date.now()): string {
-  return new Date(timestamp).toISOString().slice(0, 10);
 }
 
 export function historyKey(provider: ProviderKind, type: Holding['type'], symbol: string): string {
@@ -110,36 +102,6 @@ export function cachedSeries(cache: HistoricalCache, provider: ProviderKind, hol
     const entry = sanitizeEntry(cache[historyKey(provider, holding.type, holding.symbol)], provider, { ...holding, symbol: holding.symbol.toUpperCase() });
     return entry ? [{ symbol: entry.symbol, assetType: entry.assetType, points: entry.points }] : [];
   });
-}
-
-export function calculatePortfolioHistory(
-  holdings: Holding[],
-  series: HistoricalSeries[],
-  quotes: Quote[],
-  startDate: string,
-  endDate: string
-): PortfolioHistoryPoint[] {
-  const active = holdings.filter((holding) => normalizeQuantity(holding.quantity) > 0);
-  if (!active.length) return [];
-  const seriesMap = new Map(series.map((item) => [seriesKey(item.assetType, item.symbol), new Map(sanitizePoints(item.points).map((point) => [point.date, point.price]))]));
-  const quoteMap = new Map(quotes.filter((quote) => Number.isFinite(quote.price) && quote.price > 0).map((quote) => [seriesKey(quote.assetType, quote.symbol), quote.price]));
-  const lastPrice = new Map<string, number>();
-  const result: PortfolioHistoryPoint[] = [];
-
-  for (const date of datesBetween(startDate, endDate)) {
-    let value = 0;
-    let complete = true;
-    for (const holding of active) {
-      const key = seriesKey(holding.type, holding.symbol);
-      const historical = seriesMap.get(key)?.get(date);
-      if (historical != null) lastPrice.set(key, historical);
-      const price = date === endDate ? (quoteMap.get(key) ?? lastPrice.get(key)) : lastPrice.get(key);
-      if (price == null) { complete = false; break; }
-      value += normalizeQuantity(holding.quantity) * price;
-    }
-    if (complete && Number.isFinite(value)) result.push({ date, value });
-  }
-  return result;
 }
 
 export function calculateHistoryChange(points: PortfolioHistoryPoint[], index = points.length - 1): number {
